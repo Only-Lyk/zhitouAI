@@ -1,15 +1,17 @@
-import akshare as ak
 import pandas as pd
 import time
 import random
 import requests
+import json
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import functools
 
 
-# 设置 AKShare 请求头，模拟浏览器
-ak.set_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+TENCENT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://finance.qq.com/",
+}
 
 
 def retry_on_error(max_retries: int = 3, delay: float = 1.0):
@@ -36,56 +38,74 @@ def _sleep_random(min_sec: float = 0.3, max_sec: float = 1.0):
     time.sleep(random.uniform(min_sec, max_sec))
 
 
+def _get_tencent_prefix(code: str) -> str:
+    """获取腾讯接口前缀"""
+    if code.startswith("6") or code.startswith("5") or code.startswith("9"):
+        return "sh"
+    return "sz"
+
+
 @retry_on_error(max_retries=3, delay=1.5)
 def get_market_indices() -> List[Dict[str, Any]]:
     """获取主要大盘指数"""
     try:
         _sleep_random()
-        df = ak.stock_zh_index_spot_em()
-        indices = []
+        codes = "sh000001,sz399001,sz399006,sh000688"
+        url = f"https://qt.gtimg.cn/q={codes}"
+        resp = requests.get(url, headers=TENCENT_HEADERS, timeout=10)
+        resp.encoding = "gbk"
+        text = resp.text
+
         code_map = {
-            "sh000001": "上证指数",
-            "sz399001": "深证成指",
-            "sz399006": "创业板指",
-            "sh000688": "科创50",
-            "sh000016": "上证50",
+            "000001": "上证指数",
+            "399001": "深证成指",
+            "399006": "创业板指",
+            "000688": "科创50",
         }
-        for _, row in df.iterrows():
-            code = row.get("代码", "")
-            if f"sh{code}" in code_map or f"sz{code}" in code_map:
-                full_code = f"sh{code}" if code.startswith("0") or code.startswith("6") else f"sz{code}"
-                indices.append({
-                    "name": code_map.get(full_code, row.get("名称", "")),
-                    "code": code,
-                    "price": float(row.get("最新价", 0)),
-                    "change": float(row.get("涨跌额", 0)),
-                    "change_pct": float(row.get("涨跌幅", 0)),
-                })
-        return indices[:5]
+        indices = []
+        for line in text.split(";"):
+            line = line.strip()
+            if not line or "v_pv_none_match" in line:
+                continue
+            parts = line.split('"')
+            if len(parts) < 2:
+                continue
+            data = parts[1].split("~")
+            if len(data) < 45:
+                continue
+            code = data[2]
+            name = code_map.get(code, data[1])
+            indices.append({
+                "name": name,
+                "code": code,
+                "price": float(data[3]) if data[3] else 0,
+                "change": float(data[4]) if data[4] else 0,
+                "change_pct": float(data[5]) if data[5] else 0,
+            })
+        return indices if indices else _mock_indices()
     except Exception as e:
         print(f"Error fetching indices: {e}")
-        return [
-            {"name": "上证指数", "code": "000001", "price": 3050.23, "change": 12.5, "change_pct": 0.41},
-            {"name": "深证成指", "code": "399001", "price": 9780.56, "change": -23.1, "change_pct": -0.24},
-            {"name": "创业板指", "code": "399006", "price": 1920.45, "change": 8.3, "change_pct": 0.43},
-        ]
+        return _mock_indices()
+
+
+def _mock_indices() -> List[Dict[str, Any]]:
+    return [
+        {"name": "上证指数", "code": "000001", "price": 3050.23, "change": 12.5, "change_pct": 0.41},
+        {"name": "深证成指", "code": "399001", "price": 9780.56, "change": -23.1, "change_pct": -0.24},
+        {"name": "创业板指", "code": "399006", "price": 1920.45, "change": 8.3, "change_pct": 0.43},
+    ]
 
 
 def _fetch_quote_from_tencent(code: str) -> Optional[Dict[str, Any]]:
-    """从腾讯财经获取个股行情（备选数据源）"""
+    """从腾讯财经获取个股行情"""
     try:
-        prefix = "sh" if code.startswith("6") or code.startswith("5") or code.startswith("9") else "sz"
+        prefix = _get_tencent_prefix(code)
         url = f"https://qt.gtimg.cn/q={prefix}{code}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://finance.qq.com/",
-        }
-        resp = requests.get(url, headers=headers, timeout=10)
+        resp = requests.get(url, headers=TENCENT_HEADERS, timeout=10)
         resp.encoding = "gbk"
         text = resp.text
         if not text or "v_pv_none_match" in text:
             return None
-        # 解析腾讯返回的格式: v_sh600519="1~贵州茅台~600519~..."
         parts = text.split('"')
         if len(parts) < 2:
             return None
@@ -111,33 +131,10 @@ def _fetch_quote_from_tencent(code: str) -> Optional[Dict[str, Any]]:
 @retry_on_error(max_retries=2, delay=1.0)
 def get_stock_quote(code: str) -> Dict[str, Any]:
     """获取单只股票行情"""
-    # 先尝试腾讯接口（更稳定）
-    tencent_data = _fetch_quote_from_tencent(code)
-    if tencent_data:
-        return tencent_data
-
-    #  fallback 到 AKShare
-    try:
-        _sleep_random()
-        df = ak.stock_zh_a_spot_em()
-        row = df[df["代码"] == code]
-        if len(row) == 0:
-            return _mock_stock_quote(code)
-        r = row.iloc[0]
-        return {
-            "code": code,
-            "name": str(r.get("名称", "")),
-            "price": float(r.get("最新价", 0)),
-            "change": float(r.get("涨跌额", 0)),
-            "change_pct": float(r.get("涨跌幅", 0)),
-            "volume": float(r.get("成交量", 0)) / 10000,
-            "market_cap": float(r.get("总市值", 0)) / 1e8 if pd.notna(r.get("总市值")) else None,
-            "pe": float(r.get("市盈率-动态", 0)) if pd.notna(r.get("市盈率-动态")) else None,
-            "pb": float(r.get("市净率", 0)) if pd.notna(r.get("市净率")) else None,
-        }
-    except Exception as e:
-        print(f"Error fetching quote {code}: {e}")
-        return _mock_stock_quote(code)
+    data = _fetch_quote_from_tencent(code)
+    if data:
+        return data
+    return _mock_stock_quote(code)
 
 
 def _mock_stock_quote(code: str) -> Dict[str, Any]:
@@ -158,15 +155,11 @@ def _mock_stock_quote(code: str) -> Dict[str, Any]:
 
 
 def _fetch_kline_from_tencent(code: str, days: int = 120) -> List[Dict[str, Any]]:
-    """从腾讯财经获取K线数据（备选数据源）"""
+    """从腾讯财经获取K线数据"""
     try:
-        prefix = "sh" if code.startswith("6") or code.startswith("5") or code.startswith("9") else "sz"
+        prefix = _get_tencent_prefix(code)
         url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={prefix}{code},day,,,{days},qfq"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://finance.qq.com/",
-        }
-        resp = requests.get(url, headers=headers, timeout=15)
+        resp = requests.get(url, headers=TENCENT_HEADERS, timeout=15)
         resp.encoding = "gbk"
         data = resp.json()
         key = f"{prefix}{code}"
@@ -192,35 +185,10 @@ def _fetch_kline_from_tencent(code: str, days: int = 120) -> List[Dict[str, Any]
 @retry_on_error(max_retries=2, delay=1.0)
 def get_kline_data(code: str, period: str = "daily", days: int = 120) -> List[Dict[str, Any]]:
     """获取K线数据"""
-    # 先尝试腾讯接口（更稳定）
     tencent_kline = _fetch_kline_from_tencent(code, days)
     if tencent_kline and len(tencent_kline) > 0:
         return tencent_kline
-
-    # fallback 到 AKShare
-    try:
-        _sleep_random()
-        if period == "daily":
-            df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date="20240101", adjust="qfq")
-        else:
-            df = ak.stock_zh_a_hist(symbol=code, period="weekly", start_date="20240101", adjust="qfq")
-        if df is None or len(df) == 0:
-            return _mock_kline(code, days)
-        df = df.tail(days)
-        klines = []
-        for _, row in df.iterrows():
-            klines.append({
-                "date": str(row.get("日期", "")),
-                "open": float(row.get("开盘", 0)),
-                "high": float(row.get("最高", 0)),
-                "low": float(row.get("最低", 0)),
-                "close": float(row.get("收盘", 0)),
-                "volume": float(row.get("成交量", 0)) / 10000,
-            })
-        return klines
-    except Exception as e:
-        print(f"Error fetching kline {code}: {e}")
-        return _mock_kline(code, days)
+    return _mock_kline(code, days)
 
 
 def _mock_kline(code: str, days: int) -> List[Dict[str, Any]]:
@@ -297,19 +265,22 @@ def calculate_indicators(klines: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 @retry_on_error(max_retries=2, delay=1.0)
 def search_stocks(keyword: str) -> List[Dict[str, Any]]:
-    """搜索股票"""
+    """搜索股票（使用腾讯搜索接口）"""
     try:
         _sleep_random()
-        df = ak.stock_zh_a_spot_em()
-        df = df[df["名称"].str.contains(keyword, na=False) | df["代码"].str.contains(keyword, na=False)]
+        # 使用腾讯接口搜索
+        url = f"https://searchapi.eastmoney.com/api/suggest/get?input={keyword}&type=14&count=20"
+        resp = requests.get(url, headers=TENCENT_HEADERS, timeout=10)
+        data = resp.json()
         results = []
-        for _, r in df.head(20).iterrows():
-            results.append({
-                "code": str(r.get("代码", "")),
-                "name": str(r.get("名称", "")),
-                "price": float(r.get("最新价", 0)),
-                "change_pct": float(r.get("涨跌幅", 0)),
-            })
+        if "QuotationCodeTable" in data and "Data" in data["QuotationCodeTable"]:
+            for item in data["QuotationCodeTable"]["Data"]:
+                results.append({
+                    "code": item.get("Code", ""),
+                    "name": item.get("Name", ""),
+                    "price": 0,
+                    "change_pct": 0,
+                })
         return results
     except Exception as e:
         print(f"Error searching stocks: {e}")
@@ -318,22 +289,29 @@ def search_stocks(keyword: str) -> List[Dict[str, Any]]:
 
 @retry_on_error(max_retries=2, delay=1.0)
 def get_hot_sectors() -> List[Dict[str, Any]]:
-    """获取热点板块"""
+    """获取热点板块（使用东方财富接口）"""
     try:
         _sleep_random()
-        df = ak.stock_sector_spot_em()
+        url = "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=20&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f3,f4,f128,f140"
+        resp = requests.get(url, headers=TENCENT_HEADERS, timeout=10)
+        data = resp.json()
         sectors = []
-        for _, r in df.head(10).iterrows():
-            sectors.append({
-                "name": str(r.get("板块", "")),
-                "change_pct": float(r.get("涨跌幅", 0)),
-                "leader": str(r.get("领涨股", "")),
-            })
-        return sectors
+        if "data" in data and "diff" in data["data"]:
+            for item in data["data"]["diff"]:
+                sectors.append({
+                    "name": item.get("f14", ""),
+                    "change_pct": float(item.get("f3", 0)),
+                    "leader": item.get("f128", ""),
+                })
+        return sectors[:10] if sectors else _mock_sectors()
     except Exception as e:
         print(f"Error fetching sectors: {e}")
-        return [
-            {"name": "半导体", "change_pct": 3.52, "leader": "中芯国际"},
-            {"name": "新能源", "change_pct": 2.18, "leader": "宁德时代"},
-            {"name": "白酒", "change_pct": -1.05, "leader": "贵州茅台"},
-        ]
+        return _mock_sectors()
+
+
+def _mock_sectors() -> List[Dict[str, Any]]:
+    return [
+        {"name": "半导体", "change_pct": 3.52, "leader": "中芯国际"},
+        {"name": "新能源", "change_pct": 2.18, "leader": "宁德时代"},
+        {"name": "白酒", "change_pct": -1.05, "leader": "贵州茅台"},
+    ]
