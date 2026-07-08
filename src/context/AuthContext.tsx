@@ -5,6 +5,7 @@ interface User {
   username: string;
   is_admin: boolean;
   credits?: number;
+  default_model?: string;
 }
 
 interface AuthContextType {
@@ -13,6 +14,7 @@ interface AuthContextType {
   login: (token: string, user: User) => void;
   logout: () => void;
   refreshUser: () => Promise<void>;
+  updateUser: (patch: Partial<User>) => void;
   loading: boolean;
 }
 
@@ -22,6 +24,7 @@ const AuthContext = createContext<AuthContextType>({
   login: () => {},
   logout: () => {},
   refreshUser: async () => {},
+  updateUser: () => {},
   loading: true,
 });
 
@@ -65,6 +68,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const updateUser = (patch: Partial<User>) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      localStorage.setItem('user', JSON.stringify(next));
+      return next;
+    });
+  };
+
   const refreshUser = async () => {
     if (!token) return;
     try {
@@ -84,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, refreshUser, loading }}>
+    <AuthContext.Provider value={{ user, token, login, logout, refreshUser, updateUser, loading }}>
       {children}
     </AuthContext.Provider>
   );

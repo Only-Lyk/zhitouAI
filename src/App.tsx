@@ -9,6 +9,7 @@ import ChatPage from './pages/ChatPage';
 import WatchlistPage from './pages/WatchlistPage';
 import LoginPage from './pages/LoginPage';
 import AdminPage from './pages/AdminPage';
+import SettingsPage from './pages/SettingsPage';
 
 function AppRoutes() {
   const location = useLocation();
@@ -32,6 +33,7 @@ function AppRoutes() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

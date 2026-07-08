@@ -81,6 +81,8 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = []
+    model: Optional[str] = None
+
 
 
 # ========== Auth & User ==========
@@ -101,6 +103,8 @@ class UserResponse(BaseModel):
     username: str
     email: Optional[str] = None
     is_admin: int = 0
+    credits: Optional[int] = None
+    default_model: Optional[str] = None
 
 
 class CreditInfo(BaseModel):

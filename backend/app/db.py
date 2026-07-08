@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE,
     password_hash TEXT NOT NULL,
     is_admin INTEGER DEFAULT 0,
+    default_model TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -29,6 +30,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     type TEXT NOT NULL,
     amount INTEGER NOT NULL,
     description TEXT,
+    tokens_used INTEGER DEFAULT 0,
+    model_id TEXT,
+    price_per_1k REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -54,17 +58,15 @@ VALUES (1, 'admin', 'admin@zhitou.ai', '$2b$12$Hn9W81KKRF6PBeLGSxcPYuQxAYgbsSeU.
 INSERT OR IGNORE INTO credits (user_id, balance, total_recharged)
 VALUES (1, 10000, 10000);
 
--- 初始化积分规则
-INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('ai_diagnose_cost', '10');
-INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('ai_chat_cost', '5');
-INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('ai_recommendation_cost', '5');
+-- 初始化积分与充值规则
 INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('register_gift_credits', '100');
 INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('daily_checkin_credits', '10');
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('credit_exchange_rate', '100');
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('profit_ratio', '1.3');
 
--- 初始化 LLM 配置（空值表示未配置）
-INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('llm_api_key', '');
-INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('llm_base_url', 'https://api.deepseek.com');
-INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('llm_model', 'deepseek-chat');
+-- 初始化模型配置（默认 DeepSeek）
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('llm_models_config', '{"models":[{"id":"deepseek-chat","name":"DeepSeek Chat","base_url":"https://api.deepseek.com","api_key":"","peak_price_per_1k":0.01,"valley_price_per_1k":0.005,"peak_start":"09:00","peak_end":"23:00","default":true}]}');
+
 """
 
 

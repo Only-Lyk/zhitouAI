@@ -48,11 +48,10 @@ CHAT_PROMPT = """你是一位资深股票分析师，擅长技术分析和基本
 用户问题："""
 
 
-async def _call_llm_stream(system: str, user: str) -> AsyncGenerator[str, None]:
-    """调用外部 LLM API（SSE 流式）"""
-    cfg = _get_llm_config()
-    if not cfg["api_key"]:
-        yield "【系统提示】当前未配置 LLM API Key。\n"
+async def _call_llm_stream(system: str, user: str, model_config: Dict[str, Any]) -> AsyncGenerator[str, None]:
+    """调用外部 LLM API（SSE 流式），同时返回 token usage"""
+    if not model_config.get("api_key"):
+        yield "【系统提示】当前模型未配置 API Key。\n"
         yield "请进入「管理后台 → LLM配置」填写 API Key、Base URL 和 Model。\n\n"
         return
 
@@ -62,23 +61,24 @@ async def _call_llm_stream(system: str, user: str) -> AsyncGenerator[str, None]:
     messages.append({"role": "user", "content": user})
 
     payload = {
-        "model": cfg["model"],
+        "model": model_config.get("model_id", model_config.get("id", "deepseek-chat")),
         "messages": messages,
         "stream": True,
+        "stream_options": {"include_usage": True},
         "temperature": 0.7,
         "max_tokens": 2048,
     }
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {cfg['api_key']}",
+        "Authorization": f"Bearer {model_config['api_key']}",
     }
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             async with client.stream(
                 "POST",
-                f"{cfg['base_url']}/v1/chat/completions",
+                f"{model_config['base_url']}/v1/chat/completions",
                 headers=headers,
                 json=payload,
             ) as response:
@@ -95,14 +95,24 @@ async def _call_llm_stream(system: str, user: str) -> AsyncGenerator[str, None]:
                         break
                     try:
                         chunk = json.loads(data)
+                        # 标准流式 chunk 输出内容
                         delta = chunk.get("choices", [{}])[0].get("delta", {})
                         content = delta.get("content", "")
                         if content:
                             yield content
+                        # 部分 provider 在最后一个 chunk 返回 usage
+                        usage = chunk.get("usage")
+                        if usage:
+                            prompt_tokens = usage.get("prompt_tokens", 0)
+                            completion_tokens = usage.get("completion_tokens", 0)
+                            total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
+                            if total_tokens > 0:
+                                yield f"\n__TOKENS__:{total_tokens}__"
                     except json.JSONDecodeError:
                         continue
     except Exception as e:
         yield f"\n【请求异常】{str(e)}\n"
+
 
 
 async def diagnose_stock(code: str) -> Dict[str, Any]:
@@ -188,9 +198,15 @@ async def diagnose_stock(code: str) -> Dict[str, Any]:
     }
 
 
-async def diagnose_stock_stream(code: str) -> AsyncGenerator[str, None]:
+async def diagnose_stock_stream(code: str, model_config: Dict[str, Any] = None) -> AsyncGenerator[str, None]:
     """流式AI诊断输出（优先LLM，兜底本地规则）"""
-    if not _llm_enabled():
+    from .admin_service import get_models_config
+
+    if model_config is None:
+        models = get_models_config().get("models", [])
+        model_config = next((m for m in models if m.get("default")), models[0] if models else None)
+
+    if not model_config or not model_config.get("api_key"):
         # 模拟流式输出
         result = await diagnose_stock(code)
         sections = [
@@ -233,8 +249,9 @@ RSI(14)：{indicators.get('rsi14', 'N/A')}
 布林下轨：{indicators.get('boll_down', 'N/A')}
 """
 
-    async for chunk in _call_llm_stream("", user_prompt):
+    async for chunk in _call_llm_stream("", user_prompt, model_config):
         yield chunk
+
 
 
 async def get_daily_recommendations() -> List[Dict[str, Any]]:
@@ -258,9 +275,15 @@ async def get_daily_recommendations() -> List[Dict[str, Any]]:
     return recommendations
 
 
-async def chat_about_stock(message: str, history: List[Dict[str, Any]]) -> AsyncGenerator[str, None]:
+async def chat_about_stock(message: str, history: List[Dict[str, Any]], model_config: Dict[str, Any] = None) -> AsyncGenerator[str, None]:
     """AI股票问答（流式）"""
-    if not _llm_enabled():
+    from .admin_service import get_models_config
+
+    if model_config is None:
+        models = get_models_config().get("models", [])
+        model_config = next((m for m in models if m.get("default")), models[0] if models else None)
+
+    if not model_config or not model_config.get("api_key"):
         response = f"我收到了您的问题：{message}\n\n在实际部署环境中，这里会调用大语言模型（如DeepSeek/豆包）进行深度分析。当前未配置 LLM_API_KEY，使用模拟模式。\n\n您可以问我：\n1. 某只股票的技术分析\n2. 市场热点解读\n3. 投资策略建议\n4. 财务指标含义"
         for char in response:
             yield char
@@ -268,5 +291,6 @@ async def chat_about_stock(message: str, history: List[Dict[str, Any]]) -> Async
         return
 
     user_prompt = CHAT_PROMPT + message
-    async for chunk in _call_llm_stream("", user_prompt):
+    async for chunk in _call_llm_stream("", user_prompt, model_config):
         yield chunk
+

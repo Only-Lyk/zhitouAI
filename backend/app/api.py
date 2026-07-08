@@ -46,7 +46,7 @@ async def register(req: UserRegister):
             user["id"], init_credits, "新用户注册赠送"
         )
 
-    return {"id": user["id"], "username": user["username"], "email": user["email"], "is_admin": user["is_admin"]}
+    return {"id": user["id"], "username": user["username"], "email": user["email"], "is_admin": user["is_admin"], "default_model": user.get("default_model")}
 
 
 @router.post("/api/auth/login")
@@ -67,6 +67,8 @@ async def login(req: UserLogin):
             "username": user["username"],
             "email": user["email"],
             "is_admin": user["is_admin"],
+            "credits": credits["balance"],
+            "default_model": user.get("default_model"),
         },
         "credits": credits,
     }
@@ -74,12 +76,40 @@ async def login(req: UserLogin):
 
 @router.get("/api/auth/me", response_model=UserResponse)
 async def get_me(current_user: dict = Depends(get_current_user)):
+    credits = credit_service.get_user_credits(current_user["id"])
     return {
         "id": current_user["id"],
         "username": current_user["username"],
         "email": current_user["email"],
         "is_admin": current_user["is_admin"],
+        "credits": credits["balance"],
+        "default_model": current_user.get("default_model"),
     }
+
+
+@router.get("/api/auth/default-model")
+async def get_default_model(current_user: dict = Depends(get_current_user)):
+    model = _get_user_default_model(current_user["id"])
+    return {"default_model": model}
+
+
+@router.post("/api/auth/default-model")
+async def set_default_model(
+    req: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    model_id = req.get("model_id")
+    models = admin_service.get_models_config().get("models", [])
+    valid_ids = {m.get("id") for m in models}
+    if model_id and model_id not in valid_ids:
+        raise HTTPException(status_code=400, detail="无效的模型ID")
+    with get_db() as db:
+        db.execute(
+            "UPDATE users SET default_model = ? WHERE id = ?",
+            (model_id, current_user["id"]),
+        )
+        db.commit()
+    return {"success": True, "default_model": model_id}
 
 
 @router.get("/api/auth/credits")
@@ -137,76 +167,148 @@ async def hot_sectors():
     return data_service.get_hot_sectors()
 
 
-# ========== AI (with credit check) ==========
+# ========== AI (with token-based credit) ==========
 
-def _check_ai_credit(user_id: int, action: str, description: str) -> None:
-    cost = credit_service.get_ai_cost(action)
-    if cost <= 0:
+@router.get("/api/ai/models")
+async def ai_models(current_user: dict = Depends(get_current_user)):
+    """返回可用模型列表（隐藏 API Key）"""
+    cfg = admin_service.get_models_config()
+    models = []
+    for m in cfg.get("models", []):
+        models.append({
+            "id": m.get("id"),
+            "name": m.get("name"),
+            "default": m.get("default", False),
+            "peak_price_per_1k": m.get("peak_price_per_1k", 0),
+            "valley_price_per_1k": m.get("valley_price_per_1k", 0),
+            "peak_start": m.get("peak_start", "09:00"),
+            "peak_end": m.get("peak_end", "23:00"),
+        })
+    return {"models": models}
+
+def _get_user_default_model(user_id: int) -> Optional[str]:
+    with get_db() as db:
+        cursor = db.execute("SELECT default_model FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        return row["default_model"] if row and row["default_model"] else None
+
+
+def _resolve_model_config(model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    models = admin_service.get_models_config().get("models", [])
+    if not models:
+        return None
+    if model_id:
+        for m in models:
+            if m.get("id") == model_id:
+                return m
+    return next((m for m in models if m.get("default")), models[0])
+
+
+async def _consume_after_stream(user_id: int, model_id: Optional[str], full_text: str, description: str) -> None:
+    """流式结束后根据实际 token 消耗扣积分"""
+    import re
+    match = re.search(r"__TOKENS__:([0-9]+)__", full_text)
+    if not match:
         return
-    ok = credit_service.consume_credits(user_id, cost, description)
-    if not ok:
-        raise HTTPException(
-            status_code=402,
-            detail=f"积分不足，{description}需要消耗 {cost} 积分，请充值后再试。"
-        )
+    tokens = int(match.group(1))
+    actual_model_id = model_id or _resolve_model_config().get("id")
+    credit_service.consume_ai_credits(user_id, actual_model_id, tokens, description)
 
 
 @router.get("/api/ai/diagnose")
 async def ai_diagnose(
     code: str = Query(...),
-    current_user: dict = Depends(get_current_user)
+    model: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
 ):
-    _check_ai_credit(current_user["id"], "diagnose", f"AI诊断 {code}")
-    result = await ai_service.diagnose_stock(code)
-    return result
+    model_config = _resolve_model_config(model)
+    if not model_config or not model_config.get("api_key"):
+        return await ai_service.diagnose_stock(code)
+
+    cost = credit_service.calculate_ai_cost(model_config.get("id"), 1000)
+    if cost > 0 and credit_service.get_user_credits(current_user["id"])["balance"] < cost:
+        raise HTTPException(status_code=402, detail="积分余额不足，请充值后再试。")
+
+    return await ai_service.diagnose_stock(code)
 
 
 @router.get("/api/ai/diagnose/stream")
 async def ai_diagnose_stream(
     code: str = Query(...),
-    current_user: dict = Depends(get_current_user)
+    model: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
 ):
-    cost = credit_service.get_ai_cost("diagnose")
-    if cost > 0:
-        ok = credit_service.consume_credits(current_user["id"], cost, f"AI诊断 {code}")
-        if not ok:
-            async def error_gen():
-                yield f"data: {json.dumps({'chunk': f'积分不足，AI诊断需要消耗 {cost} 积分，请充值后再试。'}, ensure_ascii=False)}\n\n"
-                yield "data: [DONE]\n\n"
-            return StreamingResponse(error_gen(), media_type="text/event-stream")
+    model_config = _resolve_model_config(model or _get_user_default_model(current_user["id"]))
+    if not model_config or not model_config.get("api_key"):
+        async def mock_gen():
+            async for chunk in ai_service.diagnose_stock_stream(code, model_config):
+                yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(mock_gen(), media_type="text/event-stream")
+
+    cost = credit_service.calculate_ai_cost(model_config.get("id"), 1000)
+    if cost > 0 and credit_service.get_user_credits(current_user["id"])["balance"] < cost:
+        async def error_gen():
+            yield f"data: {json.dumps({'chunk': '积分余额不足，请充值后再试。'}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(error_gen(), media_type="text/event-stream")
 
     async def event_generator():
-        async for chunk in ai_service.diagnose_stock_stream(code):
+        buffer = ""
+        async for chunk in ai_service.diagnose_stock_stream(code, model_config):
+            buffer += chunk
             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+        await _consume_after_stream(current_user["id"], model_config.get("id"), buffer, f"AI诊断 {code}")
         yield "data: [DONE]\n\n"
+
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/api/ai/recommendations")
-async def ai_recommendations(current_user: dict = Depends(get_current_user)):
-    _check_ai_credit(current_user["id"], "recommendation", "AI每日推荐")
+async def ai_recommendations(
+    model: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    model_config = _resolve_model_config(model or _get_user_default_model(current_user["id"]))
+    if model_config and model_config.get("api_key"):
+        cost = credit_service.calculate_ai_cost(model_config.get("id"), 500)
+        if cost > 0:
+            ok = credit_service.consume_credits(current_user["id"], cost, "AI每日推荐")
+            if not ok:
+                raise HTTPException(status_code=402, detail="积分余额不足，请充值后再试。")
     return await ai_service.get_daily_recommendations()
 
 
 @router.post("/api/ai/chat")
 async def ai_chat(
     req: ChatRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
-    cost = credit_service.get_ai_cost("chat")
-    if cost > 0:
-        ok = credit_service.consume_credits(current_user["id"], cost, f"AI问答: {req.message[:20]}...")
-        if not ok:
-            async def error_gen():
-                yield f"data: {json.dumps({'chunk': f'积分不足，AI问答需要消耗 {cost} 积分，请充值后再试。'}, ensure_ascii=False)}\n\n"
-                yield "data: [DONE]\n\n"
-            return StreamingResponse(error_gen(), media_type="text/event-stream")
+    model_config = _resolve_model_config(req.model or _get_user_default_model(current_user["id"]))
+    if not model_config or not model_config.get("api_key"):
+        async def mock_gen():
+            async for chunk in ai_service.chat_about_stock(req.message, [h.model_dump() for h in req.history], model_config):
+                yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(mock_gen(), media_type="text/event-stream")
+
+    cost = credit_service.calculate_ai_cost(model_config.get("id"), 500)
+    if cost > 0 and credit_service.get_user_credits(current_user["id"])["balance"] < cost:
+        async def error_gen():
+            yield f"data: {json.dumps({'chunk': '积分余额不足，请充值后再试。'}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(error_gen(), media_type="text/event-stream")
 
     async def event_generator():
-        async for chunk in ai_service.chat_about_stock(req.message, [h.model_dump() for h in req.history]):
+        buffer = ""
+        async for chunk in ai_service.chat_about_stock(req.message, [h.model_dump() for h in req.history], model_config):
+            buffer += chunk
             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+        await _consume_after_stream(current_user["id"], model_config.get("id"), buffer, f"AI问答: {req.message[:20]}...")
         yield "data: [DONE]\n\n"
+
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
 
 
 # ========== Admin ==========
@@ -214,12 +316,21 @@ async def ai_chat(
 @router.get("/api/admin/settings")
 async def admin_get_settings(current_user: dict = Depends(get_current_admin)):
     data = admin_service.get_all_settings()
-    # API Key 掩码处理：只显示前4位和后4位
-    key = data.get("llm_api_key", "")
-    if len(key) > 12:
-        data["llm_api_key"] = key[:4] + "****" + key[-4:]
-    elif key:
-        data["llm_api_key"] = "****"
+    # 多模型配置保持 JSON 字符串返回，前端自行解析
+    if "llm_models_config" not in data:
+        data["llm_models_config"] = '{"models":[]}'
+    # 对模型配置里的 api_key 做掩码处理
+    try:
+        cfg = json.loads(data.get("llm_models_config", "{}"))
+        for m in cfg.get("models", []):
+            key = m.get("api_key", "")
+            if len(key) > 12:
+                m["api_key"] = key[:4] + "****" + key[-4:]
+            elif key:
+                m["api_key"] = "****"
+        data["llm_models_config"] = json.dumps(cfg, ensure_ascii=False)
+    except Exception:
+        pass
     return data
 
 
@@ -230,10 +341,39 @@ async def admin_update_settings(
 ):
     old_settings = admin_service.get_all_settings()
     for key, value in settings.settings.items():
-        # 如果 API Key 是掩码格式，保留原值
-        if key == "llm_api_key" and "****" in str(value):
+        # 跳过掩码格式的 API Key，保留原值
+        if key == "llm_models_config" and isinstance(value, dict):
+            # 对传入的模型配置进行掩码还原：如果某个 api_key 是掩码，则保留旧值
+            try:
+                old_cfg = json.loads(old_settings.get("llm_models_config", "{}"))
+                old_map = {m.get("id"): m for m in old_cfg.get("models", []) if m.get("id")}
+                for m in value.get("models", []):
+                    key_val = m.get("api_key", "")
+                    if "****" in str(key_val) and m.get("id") in old_map:
+                        m["api_key"] = old_map[m["id"]].get("api_key", "")
+            except Exception:
+                pass
+            admin_service.save_models_config(value)
             continue
-        admin_service.update_setting(key, str(value))
+        # 复杂类型统一 JSON 序列化
+        if isinstance(value, (dict, list)):
+            admin_service.update_setting(key, json.dumps(value, ensure_ascii=False))
+        else:
+            admin_service.update_setting(key, str(value))
+    return {"success": True}
+
+
+@router.get("/api/admin/models")
+async def admin_get_models(current_user: dict = Depends(get_current_admin)):
+    return admin_service.get_models_config()
+
+
+@router.post("/api/admin/models")
+async def admin_update_models(
+    config: dict,
+    current_user: dict = Depends(get_current_admin)
+):
+    admin_service.save_models_config(config)
     return {"success": True}
 
 

@@ -32,7 +32,7 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || '操作失败');
+        setError(data.detail || '操作失败');
         setLoading(false);
         return;
       }

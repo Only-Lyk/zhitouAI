@@ -2,7 +2,7 @@ import { ReactNode, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import BottomNav from './BottomNav';
-import { LogOut, User, Shield, Coins, LogIn } from 'lucide-react';
+import { LogOut, User, Shield, Coins, LogIn, Settings } from 'lucide-react';
 
 interface LayoutProps {
   children: ReactNode;
@@ -40,6 +40,13 @@ export default function Layout({ children }: LayoutProps) {
                   <Shield size={12} /> 管理
                 </button>
               )}
+              <button
+                onClick={() => navigate('/settings')}
+                className="flex items-center gap-1 rounded-md bg-bg-tertiary px-2 py-1 text-xs text-text-secondary transition-colors hover:text-text-primary"
+                title="设置"
+              >
+                <Settings size={12} />
+              </button>
               <div className="flex items-center gap-1 rounded-md bg-bg-tertiary px-2 py-1 text-xs text-text-secondary">
                 <Coins size={12} className="text-accent-gold" />
                 <span className="text-text-primary">{user.credits ?? 0}</span>
