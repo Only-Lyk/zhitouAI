@@ -60,6 +60,11 @@ INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('ai_chat_cost', '5');
 INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('ai_recommendation_cost', '5');
 INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('register_gift_credits', '100');
 INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('daily_checkin_credits', '10');
+
+-- 初始化 LLM 配置（空值表示未配置）
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('llm_api_key', '');
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('llm_base_url', 'https://api.deepseek.com');
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('llm_model', 'deepseek-chat');
 """
 
 

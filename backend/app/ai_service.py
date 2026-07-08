@@ -1,21 +1,24 @@
-import os
 import json
 import asyncio
 import httpx
 from typing import List, Dict, Any, AsyncGenerator
 from datetime import datetime
 from .data_service import get_stock_quote, get_kline_data, calculate_indicators
+from .admin_service import get_all_settings
 
-# ---- LLM 配置 ----
-LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")
-LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
-LLM_ENABLED = bool(LLM_API_KEY)
 
-DEFAULT_HEADERS = {
-    "Content-Type": "application/json",
-    "Authorization": f"Bearer {LLM_API_KEY}",
-}
+def _get_llm_config() -> Dict[str, str]:
+    """从数据库动态读取 LLM 配置"""
+    settings = get_all_settings()
+    return {
+        "api_key": settings.get("llm_api_key", ""),
+        "base_url": settings.get("llm_base_url", "https://api.deepseek.com"),
+        "model": settings.get("llm_model", "deepseek-chat"),
+    }
+
+
+def _llm_enabled() -> bool:
+    return bool(_get_llm_config()["api_key"])
 
 DIAGNOSE_PROMPT = """你是一位拥有20年经验的资深量化分析师。请基于以下股票数据，进行专业技术分析，输出以下格式的报告：
 
@@ -47,10 +50,10 @@ CHAT_PROMPT = """你是一位资深股票分析师，擅长技术分析和基本
 
 async def _call_llm_stream(system: str, user: str) -> AsyncGenerator[str, None]:
     """调用外部 LLM API（SSE 流式）"""
-    if not LLM_ENABLED:
-        # 未配置 API Key，返回提示
-        yield "【系统提示】当前未配置 LLM API Key，使用模拟数据模式。\n"
-        yield "请在服务器环境变量中设置 LLM_API_KEY、LLM_BASE_URL 和 LLM_MODEL。\n\n"
+    cfg = _get_llm_config()
+    if not cfg["api_key"]:
+        yield "【系统提示】当前未配置 LLM API Key。\n"
+        yield "请进入「管理后台 → LLM配置」填写 API Key、Base URL 和 Model。\n\n"
         return
 
     messages = []
@@ -59,19 +62,24 @@ async def _call_llm_stream(system: str, user: str) -> AsyncGenerator[str, None]:
     messages.append({"role": "user", "content": user})
 
     payload = {
-        "model": LLM_MODEL,
+        "model": cfg["model"],
         "messages": messages,
         "stream": True,
         "temperature": 0.7,
         "max_tokens": 2048,
     }
 
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {cfg['api_key']}",
+    }
+
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             async with client.stream(
                 "POST",
-                f"{LLM_BASE_URL}/v1/chat/completions",
-                headers=DEFAULT_HEADERS,
+                f"{cfg['base_url']}/v1/chat/completions",
+                headers=headers,
                 json=payload,
             ) as response:
                 if response.status_code != 200:
@@ -182,7 +190,7 @@ async def diagnose_stock(code: str) -> Dict[str, Any]:
 
 async def diagnose_stock_stream(code: str) -> AsyncGenerator[str, None]:
     """流式AI诊断输出（优先LLM，兜底本地规则）"""
-    if not LLM_ENABLED:
+    if not _llm_enabled():
         # 模拟流式输出
         result = await diagnose_stock(code)
         sections = [
@@ -252,7 +260,7 @@ async def get_daily_recommendations() -> List[Dict[str, Any]]:
 
 async def chat_about_stock(message: str, history: List[Dict[str, Any]]) -> AsyncGenerator[str, None]:
     """AI股票问答（流式）"""
-    if not LLM_ENABLED:
+    if not _llm_enabled():
         response = f"我收到了您的问题：{message}\n\n在实际部署环境中，这里会调用大语言模型（如DeepSeek/豆包）进行深度分析。当前未配置 LLM_API_KEY，使用模拟模式。\n\n您可以问我：\n1. 某只股票的技术分析\n2. 市场热点解读\n3. 投资策略建议\n4. 财务指标含义"
         for char in response:
             yield char

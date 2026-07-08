@@ -213,7 +213,14 @@ async def ai_chat(
 
 @router.get("/api/admin/settings")
 async def admin_get_settings(current_user: dict = Depends(get_current_admin)):
-    return admin_service.get_all_settings()
+    data = admin_service.get_all_settings()
+    # API Key 掩码处理：只显示前4位和后4位
+    key = data.get("llm_api_key", "")
+    if len(key) > 12:
+        data["llm_api_key"] = key[:4] + "****" + key[-4:]
+    elif key:
+        data["llm_api_key"] = "****"
+    return data
 
 
 @router.post("/api/admin/settings")
@@ -221,7 +228,11 @@ async def admin_update_settings(
     settings: AdminSettingsUpdate,
     current_user: dict = Depends(get_current_admin)
 ):
+    old_settings = admin_service.get_all_settings()
     for key, value in settings.settings.items():
+        # 如果 API Key 是掩码格式，保留原值
+        if key == "llm_api_key" and "****" in str(value):
+            continue
         admin_service.update_setting(key, str(value))
     return {"success": True}
 

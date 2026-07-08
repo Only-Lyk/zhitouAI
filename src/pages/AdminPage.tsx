@@ -10,6 +10,9 @@ interface AdminSettings {
   ai_diagnose_cost: number;
   signup_bonus: number;
   daily_checkin_bonus: number;
+  llm_api_key: string;
+  llm_base_url: string;
+  llm_model: string;
 }
 
 interface UserItem {
@@ -27,6 +30,9 @@ export default function AdminPage() {
     ai_diagnose_cost: 10,
     signup_bonus: 100,
     daily_checkin_bonus: 5,
+    llm_api_key: '',
+    llm_base_url: 'https://api.deepseek.com',
+    llm_model: 'deepseek-chat',
   });
   const [users, setUsers] = useState<UserItem[]>([]);
   const [saving, setSaving] = useState(false);
@@ -49,10 +55,13 @@ export default function AdminPage() {
       if (res.ok) {
         const data = await res.json();
         setSettings({
-          ai_chat_cost: data.ai_chat_cost ?? 5,
-          ai_diagnose_cost: data.ai_diagnose_cost ?? 10,
-          signup_bonus: data.signup_bonus ?? 100,
-          daily_checkin_bonus: data.daily_checkin_bonus ?? 5,
+          ai_chat_cost: Number(data.ai_chat_cost ?? 5),
+          ai_diagnose_cost: Number(data.ai_diagnose_cost ?? 10),
+          signup_bonus: Number(data.signup_bonus ?? 100),
+          daily_checkin_bonus: Number(data.daily_checkin_bonus ?? 5),
+          llm_api_key: data.llm_api_key ?? '',
+          llm_base_url: data.llm_base_url ?? 'https://api.deepseek.com',
+          llm_model: data.llm_model ?? 'deepseek-chat',
         });
       }
     } catch {
@@ -84,7 +93,7 @@ export default function AdminPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token || ''}`,
         },
-        body: JSON.stringify(settings),
+        body: JSON.stringify({ settings }),
       });
       if (res.ok) {
         setMsg('保存成功');
@@ -128,6 +137,50 @@ export default function AdminPage() {
               />
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="mb-6 rounded-xl border border-border-default bg-bg-secondary p-4">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-accent-gold">
+          <Settings size={16} />
+          LLM 模型配置
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs text-text-secondary">API Key</label>
+            <input
+              type="password"
+              value={settings.llm_api_key}
+              placeholder="sk-..."
+              onChange={(e) =>
+                setSettings((prev) => ({ ...prev, llm_api_key: e.target.value }))
+              }
+              className="w-full rounded-lg border border-border-default bg-bg-tertiary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-gold"
+            />
+            <p className="mt-1 text-[10px] text-text-tertiary">已保存的 Key 会显示为掩码，修改时直接输入完整 Key 即可覆盖。</p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-text-secondary">Base URL</label>
+            <input
+              type="text"
+              value={settings.llm_base_url}
+              onChange={(e) =>
+                setSettings((prev) => ({ ...prev, llm_base_url: e.target.value }))
+              }
+              className="w-full rounded-lg border border-border-default bg-bg-tertiary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-gold"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-text-secondary">Model</label>
+            <input
+              type="text"
+              value={settings.llm_model}
+              onChange={(e) =>
+                setSettings((prev) => ({ ...prev, llm_model: e.target.value }))
+              }
+              className="w-full rounded-lg border border-border-default bg-bg-tertiary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-gold"
+            />
+          </div>
         </div>
         {msg && (
           <div className={`mt-3 text-xs ${msg.includes('成功') ? 'text-up' : 'text-down'}`}>{msg}</div>

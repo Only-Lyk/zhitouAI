@@ -571,7 +571,15 @@ router.post('/api/admin/settings', authMiddleware, (req: any, res) => {
 
 router.get('/api/admin/settings', authMiddleware, (req: any, res) => {
   if (!req.currentUser?.is_admin) return res.status(403).json({ error: 'Forbidden' });
-  res.json({ ai_chat_cost: 5, ai_diagnose_cost: 10, signup_bonus: 100, daily_checkin_bonus: 5 });
+  res.json({
+    ai_chat_cost: 5,
+    ai_diagnose_cost: 10,
+    signup_bonus: 100,
+    daily_checkin_bonus: 5,
+    llm_api_key: 'sk-****abcd',
+    llm_base_url: 'https://api.deepseek.com',
+    llm_model: 'deepseek-chat',
+  });
 });
 
 router.get('/api/admin/users', authMiddleware, (req: any, res) => {
