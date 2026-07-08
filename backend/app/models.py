@@ -87,7 +87,7 @@ class ChatRequest(BaseModel):
 
 class UserRegister(BaseModel):
     username: str
-    email: str
+    email: Optional[str] = None
     password: str
 
 

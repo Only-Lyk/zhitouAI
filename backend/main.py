@@ -1,11 +1,13 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api import router
 from app.db import init_db
 
-app = FastAPI(title="智投AI - 量化分析系统", version="1.0.0")
+app = FastAPI(title="ZhiTouAI", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,13 +19,22 @@ app.add_middleware(
 
 app.include_router(router)
 
-static_dir = os.path.join(os.path.dirname(__file__), "dist")
-if os.path.exists(static_dir):
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+static_dir = os.path.join(os.path.dirname(__file__), "..", "dist")
 
 @app.on_event("startup")
 async def startup_event():
     init_db()
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if request.url.path.startswith("/api/") or exc.status_code != 404:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    if os.path.exists(static_dir):
+        return FileResponse(os.path.join(static_dir, "index.html"))
+    return JSONResponse(status_code=404, content={"detail": "Not Found"})
+
+if os.path.exists(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

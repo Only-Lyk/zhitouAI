@@ -221,6 +221,9 @@ def _fetch_kline_from_tencent(code: str, period: str = "day", days: int = 120) -
         return []
 
 
+PERIOD_MAP = {"daily": "day", "weekly": "week", "monthly": "month"}
+
+
 @retry_on_error(max_retries=2, delay=1.0)
 def get_kline_data(code: str, period: str = "daily", days: int = 120) -> List[Dict[str, Any]]:
     """获取K线数据，支持 daily/weekly/monthly"""
