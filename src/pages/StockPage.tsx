@@ -80,10 +80,10 @@ export default function StockPage() {
     if (!code) return;
     setLoading(true);
     Promise.all([
-      fetch(`/api/stock/quote?code=${code}`).then((r) => r.json()),
-      fetch(`/api/stock/kline?code=${code}&days=120&period=${period}`).then((r) => r.json()),
-      fetch(`/api/stock/indicators?code=${code}&period=${period}`).then((r) => r.json()),
-      fetch(`/api/ai/diagnose?code=${code}`).then((r) => r.json()),
+      fetch(`/api/stock/quote?code=${code}`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`/api/stock/kline?code=${code}&days=120&period=${period}`).then((r) => (r.ok ? r.json() : [])),
+      fetch(`/api/stock/indicators?code=${code}&period=${period}`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`/api/ai/diagnose?code=${code}`).then((r) => (r.ok ? r.json() : null)),
     ])
       .then(([q, k, i, d]) => {
         setQuote(q);

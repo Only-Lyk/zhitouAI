@@ -15,9 +15,9 @@ export default function MarketOverview() {
 
   useEffect(() => {
     fetch('/api/market/indices')
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : []))
       .then((data) => {
-        setIndices(data);
+        setIndices(Array.isArray(data) ? data : []);
         setLoading(false);
       })
       .catch(() => setLoading(false));

@@ -32,15 +32,25 @@ export default function HomePage() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/ai/recommendations').then((r) => r.json()),
-      fetch('/api/market/sectors').then((r) => r.json()),
+      fetch('/api/ai/recommendations').then((r) => {
+        if (!r.ok) throw new Error('Unauthorized');
+        return r.json();
+      }),
+      fetch('/api/market/sectors').then((r) => {
+        if (!r.ok) throw new Error('Failed');
+        return r.json();
+      }),
     ])
       .then(([recs, secs]) => {
-        setRecommendations(recs);
-        setSectors(secs);
+        setRecommendations(Array.isArray(recs) ? recs : []);
+        setSectors(Array.isArray(secs) ? secs : []);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        setRecommendations([]);
+        setSectors([]);
+        setLoading(false);
+      });
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {

@@ -26,10 +26,12 @@ export default function AIPage() {
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch('/api/ai/recommendations', { headers });
+      if (!res.ok) throw new Error('Unauthorized');
       const data = await res.json();
-      setRecommendations(data);
+      setRecommendations(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
+      setRecommendations([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
