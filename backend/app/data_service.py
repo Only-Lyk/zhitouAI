@@ -116,10 +116,10 @@ def _fetch_quote_from_tencent(code: str) -> Optional[Dict[str, Any]]:
 
         # 腾讯返回字段顺序：https://qt.gtimg.cn/q=sh600519
         # 0: 市场 1: 名称 2: 代码 3: 当前价 4: 昨收 5: 今开 6: 成交量(手) 7: 外盘 8: 内盘
-        # 9: 买一价 10: 买一量 ... 17: 市值 33: 最高 34: 最低 39: 市盈率 44: 换手率 45: 市净率
+        # 9: 买一价 10: 买一量 ... 33: 最高 34: 最低 39: 市盈率(TTM) 44: 总市值(亿元) 46: 市净率
         field_map = {
             "name": 1, "code": 2, "price": 3, "prev_close": 4, "open": 5,
-            "volume": 6, "high": 33, "low": 34, "market_cap": 17, "pe": 39, "pb": 46,
+            "volume": 6, "high": 33, "low": 34, "market_cap": 44, "pe": 39, "pb": 46,
         }
 
         def get_float(idx: int) -> Optional[float]:
@@ -142,8 +142,8 @@ def _fetch_quote_from_tencent(code: str) -> Optional[Dict[str, Any]]:
             "price": round(price, 2),
             "change": round(change, 2),
             "change_pct": round(change_pct, 2),
-            "volume": (get_float(field_map["volume"]) or 0) / 100,
-            "market_cap": (get_float(field_map["market_cap"]) or 0) / 1e8 if get_float(field_map["market_cap"]) else None,
+            "volume": get_float(field_map["volume"]) or 0,
+            "market_cap": get_float(field_map["market_cap"]) or None,
             "pe": get_float(field_map["pe"]),
             "pb": get_float(field_map["pb"]),
         }

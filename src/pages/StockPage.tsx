@@ -95,9 +95,13 @@ export default function StockPage() {
         <div className="mt-4 grid grid-cols-4 gap-2">
           {[
             { label: '成交量', value: `${(quote.volume / 10000).toFixed(1)}万` },
-            { label: '市值', value: quote.market_cap ? `${(quote.market_cap / 10000).toFixed(1)}亿` : '-' },
-            { label: 'PE', value: quote.pe?.toFixed(1) ?? '-' },
-            { label: 'PB', value: quote.pb?.toFixed(2) ?? '-' },
+            { label: '市值', value: quote.market_cap ? (
+                quote.market_cap >= 10000
+                  ? `${(quote.market_cap / 10000).toFixed(2)}万亿`
+                  : `${quote.market_cap.toFixed(0)}亿`
+              ) : '-' },
+            { label: '市盈率(PE)', value: quote.pe?.toFixed(1) ?? '-' },
+            { label: '市净率(PB)', value: quote.pb?.toFixed(2) ?? '-' },
           ].map((s) => (
             <div key={s.label} className="rounded-lg bg-bg-secondary px-2 py-2 text-center">
               <div className="text-[10px] text-text-tertiary">{s.label}</div>

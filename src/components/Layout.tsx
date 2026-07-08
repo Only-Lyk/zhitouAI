@@ -9,12 +9,13 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
-    // 刷新用户信息以同步积分
+    // 路由切换时刷新用户信息，同步积分余额
+    refreshUser();
   }, [location.pathname]);
 
   return (
