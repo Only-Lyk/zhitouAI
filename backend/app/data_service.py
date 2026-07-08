@@ -151,6 +151,32 @@ def _fetch_quote_from_tencent(code: str) -> Optional[Dict[str, Any]]:
         print(f"Tencent quote fetch error for {code}: {e}")
         return None
 
+
+def get_stock_quote(code: str) -> Dict[str, Any]:
+    """获取单只股票行情"""
+    data = _fetch_quote_from_tencent(code)
+    if data:
+        return data
+    return _mock_stock_quote(code)
+
+
+def _mock_stock_quote(code: str) -> Dict[str, Any]:
+    import random
+    base = random.uniform(10, 500)
+    change_pct = random.uniform(-3, 3)
+    return {
+        "code": code,
+        "name": f"股票{code}",
+        "price": round(base, 2),
+        "change": round(base * change_pct / 100, 2),
+        "change_pct": round(change_pct, 2),
+        "volume": round(random.uniform(100, 50000), 2),
+        "market_cap": round(random.uniform(50, 5000), 2),
+        "pe": round(random.uniform(5, 80), 2),
+        "pb": round(random.uniform(0.5, 10), 2),
+    }
+
+
 def _fetch_kline_from_tencent(code: str, period: str = "day", days: int = 120) -> List[Dict[str, Any]]:
     """从腾讯财经获取K线数据（更健壮的 JSON 解析）"""
     try:
