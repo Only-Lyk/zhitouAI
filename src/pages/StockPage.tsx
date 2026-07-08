@@ -1,69 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, TrendingUp, TrendingDown, Activity, BarChart3, Brain } from 'lucide-react';
+import { calcSMA } from '../utils/indicators';
 import KLineChart from '../components/KLineChart';
 import AIScoreBadge from '../components/AIScoreBadge';
-
-interface StockQuote {
-  code: string;
-  name: string;
-  price: number;
-  change: number;
-  change_pct: number;
-  volume: number;
-  market_cap?: number;
-  pe?: number;
-  pb?: number;
-}
-
-interface Indicators {
-  ma5?: number;
-  ma10?: number;
-  ma20?: number;
-  ma60?: number;
-  macd_dif?: number;
-  macd_dea?: number;
-  macd_hist?: number;
-  rsi14?: number;
-  boll_up?: number;
-  boll_mid?: number;
-  boll_down?: number;
-}
-
-interface KLineData {
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
-interface Diagnosis {
-  score: number;
-  signal: string;
-  trend: string;
-  support?: number;
-  pressure?: number;
-  risk_level: string;
-  reason: string;
-  suggestion: string;
-}
-
-type Period = 'day' | 'week' | 'month';
-
-function calcSMA(values: number[], n: number): (number | null)[] {
-  const res: (number | null)[] = [];
-  for (let i = 0; i < values.length; i++) {
-    if (i < n - 1) {
-      res.push(null);
-      continue;
-    }
-    const sum = values.slice(i - n + 1, i + 1).reduce((a, b) => a + b, 0);
-    res.push(Math.round((sum / n) * 100) / 100);
-  }
-  return res;
-}
 
 export default function StockPage() {
   const { code } = useParams<{ code: string }>();

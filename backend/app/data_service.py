@@ -97,7 +97,7 @@ def _mock_indices() -> List[Dict[str, Any]]:
 
 
 def _fetch_quote_from_tencent(code: str) -> Optional[Dict[str, Any]]:
-    """从腾讯财经获取个股行情"""
+    """从腾讯财经获取个股行情（带字段名映射，解析更健壮）"""
     try:
         prefix = _get_tencent_prefix(code)
         url = f"https://qt.gtimg.cn/q={prefix}{code}"
@@ -106,59 +106,53 @@ def _fetch_quote_from_tencent(code: str) -> Optional[Dict[str, Any]]:
         text = resp.text
         if not text or "v_pv_none_match" in text:
             return None
+        # 解析格式：v_sh600519="1~贵州茅台~600519~..."
         parts = text.split('"')
         if len(parts) < 2:
             return None
         data = parts[1].split("~")
         if len(data) < 45:
             return None
+
+        # 腾讯返回字段顺序：https://qt.gtimg.cn/q=sh600519
+        # 0: 市场 1: 名称 2: 代码 3: 当前价 4: 昨收 5: 今开 6: 成交量(手) 7: 外盘 8: 内盘
+        # 9: 买一价 10: 买一量 ... 17: 市值 33: 最高 34: 最低 39: 市盈率 44: 换手率 45: 市净率
+        field_map = {
+            "name": 1, "code": 2, "price": 3, "prev_close": 4, "open": 5,
+            "volume": 6, "high": 33, "low": 34, "market_cap": 17, "pe": 39, "pb": 46,
+        }
+
+        def get_float(idx: int) -> Optional[float]:
+            val = data[idx] if idx < len(data) else None
+            if val and val != '':
+                try:
+                    return float(val)
+                except ValueError:
+                    return None
+            return None
+
+        price = get_float(field_map["price"]) or 0
+        prev_close = get_float(field_map["prev_close"]) or price
+        change = price - prev_close
+        change_pct = (change / prev_close * 100) if prev_close > 0 else 0
+
         return {
             "code": code,
-            "name": data[1],
-            "price": float(data[3]) if data[3] else 0,
-            "change": float(data[4]) if data[4] else 0,
-            "change_pct": float(data[5]) if data[5] else 0,
-            "volume": float(data[6]) / 100 if data[6] else 0,
-            "market_cap": float(data[17]) / 1e8 if data[17] else None,
-            "pe": float(data[39]) if data[39] else None,
-            "pb": float(data[46]) if data[46] else None,
+            "name": data[field_map["name"]] if field_map["name"] < len(data) else f"股票{code}",
+            "price": round(price, 2),
+            "change": round(change, 2),
+            "change_pct": round(change_pct, 2),
+            "volume": (get_float(field_map["volume"]) or 0) / 100,
+            "market_cap": (get_float(field_map["market_cap"]) or 0) / 1e8 if get_float(field_map["market_cap"]) else None,
+            "pe": get_float(field_map["pe"]),
+            "pb": get_float(field_map["pb"]),
         }
     except Exception as e:
         print(f"Tencent quote fetch error for {code}: {e}")
         return None
 
-
-@retry_on_error(max_retries=2, delay=1.0)
-def get_stock_quote(code: str) -> Dict[str, Any]:
-    """获取单只股票行情"""
-    data = _fetch_quote_from_tencent(code)
-    if data:
-        return data
-    return _mock_stock_quote(code)
-
-
-def _mock_stock_quote(code: str) -> Dict[str, Any]:
-    import random
-    base = random.uniform(10, 500)
-    change_pct = random.uniform(-3, 3)
-    return {
-        "code": code,
-        "name": f"股票{code}",
-        "price": round(base, 2),
-        "change": round(base * change_pct / 100, 2),
-        "change_pct": round(change_pct, 2),
-        "volume": round(random.uniform(100, 50000), 2),
-        "market_cap": round(random.uniform(50, 5000), 2),
-        "pe": round(random.uniform(5, 80), 2),
-        "pb": round(random.uniform(0.5, 10), 2),
-    }
-
-
-PERIOD_MAP = {"daily": "day", "weekly": "week", "monthly": "month"}
-
-
 def _fetch_kline_from_tencent(code: str, period: str = "day", days: int = 120) -> List[Dict[str, Any]]:
-    """从腾讯财经获取K线数据"""
+    """从腾讯财经获取K线数据（更健壮的 JSON 解析）"""
     try:
         prefix = _get_tencent_prefix(code)
         url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={prefix}{code},{period},,,{days},qfq"
@@ -166,23 +160,35 @@ def _fetch_kline_from_tencent(code: str, period: str = "day", days: int = 120) -
         resp.encoding = "gbk"
         data = resp.json()
         key = f"{prefix}{code}"
-        if "data" not in data or key not in data["data"]:
+        if not isinstance(data, dict) or "data" not in data or not isinstance(data["data"], dict):
+            return []
+        if key not in data["data"]:
             return []
         # 根据周期选择数据键
         data_key = f"qfq{period}" if period != "day" else "qfqday"
-        if data_key not in data["data"][key]:
+        stock_data = data["data"][key]
+        if not isinstance(stock_data, dict):
+            return []
+        if data_key not in stock_data:
             data_key = period if period != "day" else "day"
-        raw_data = data["data"][key].get(data_key, [])
+        raw_data = stock_data.get(data_key, [])
+        if not isinstance(raw_data, list):
+            return []
         klines = []
         for item in raw_data:
-            klines.append({
-                "date": item[0],
-                "open": float(item[1]),
-                "close": float(item[2]),
-                "low": float(item[3]),
-                "high": float(item[4]),
-                "volume": float(item[5]) / 10000,
-            })
+            if not isinstance(item, (list, tuple)) or len(item) < 6:
+                continue
+            try:
+                klines.append({
+                    "date": str(item[0]),
+                    "open": float(item[1]),
+                    "close": float(item[2]),
+                    "low": float(item[3]),
+                    "high": float(item[4]),
+                    "volume": float(item[5]) / 10000,
+                })
+            except (ValueError, TypeError, IndexError):
+                continue
         return klines
     except Exception as e:
         print(f"Tencent kline fetch error for {code} ({period}): {e}")

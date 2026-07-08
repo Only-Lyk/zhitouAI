@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Search, Plus, X, Star } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 interface WatchItem {
   code: string;
@@ -9,21 +10,82 @@ interface WatchItem {
   change_pct: number;
 }
 
-const defaultWatchlist: WatchItem[] = [
-  { code: '600519', name: '贵州茅台', price: 1528.50, change_pct: 1.21 },
-  { code: '002594', name: '比亚迪', price: 268.80, change_pct: 3.31 },
-  { code: '300750', name: '宁德时代', price: 198.50, change_pct: 2.69 },
-  { code: '000333', name: '美的集团', price: 62.35, change_pct: 1.38 },
-];
+const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 export default function WatchlistPage() {
   const navigate = useNavigate();
-  const [watchlist, setWatchlist] = useState<WatchItem[]>(defaultWatchlist);
+  const { user, token } = useAuth();
+  const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [addCode, setAddCode] = useState('');
+  const [addName, setAddName] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const removeItem = (code: string) => {
-    setWatchlist((prev) => prev.filter((i) => i.code !== code));
+  const fetchWatchlist = async () => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/watchlist`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setWatchlist(Array.isArray(data) ? data : []);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchWatchlist();
+  }, [token]);
+
+  const removeItem = async (code: string) => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/watchlist/${code}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setWatchlist((prev) => prev.filter((i) => i.code !== code));
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const addItem = async () => {
+    if (!token || !addCode.trim() || !addName.trim()) return;
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/watchlist`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ code: addCode.trim(), name: addName.trim() }),
+      });
+      if (res.ok) {
+        setWatchlist((prev) => [...prev, { code: addCode.trim(), name: addName.trim(), price: 0, change_pct: 0 }]);
+        setAddCode('');
+        setAddName('');
+        setShowAdd(false);
+      } else {
+        const data = await res.json();
+        setError(data.error || '添加失败');
+      }
+    } catch {
+      setError('网络错误');
+    }
   };
 
   const filtered = watchlist.filter(
@@ -61,9 +123,55 @@ export default function WatchlistPage() {
         </div>
       </div>
 
+      {/* Add Dialog */}
+      {showAdd && (
+        <div className="mx-4 space-y-2 rounded-xl border border-border-default bg-bg-secondary p-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={addCode}
+              onChange={(e) => setAddCode(e.target.value)}
+              placeholder="股票代码"
+              className="w-24 rounded-lg border border-border-default bg-bg-tertiary px-2 py-2 text-sm outline-none focus:border-accent-gold"
+            />
+            <input
+              type="text"
+              value={addName}
+              onChange={(e) => setAddName(e.target.value)}
+              placeholder="股票名称"
+              className="flex-1 rounded-lg border border-border-default bg-bg-tertiary px-2 py-2 text-sm outline-none focus:border-accent-gold"
+            />
+            <button
+              onClick={addItem}
+              className="rounded-lg bg-accent-gold px-3 py-2 text-xs font-semibold text-bg-primary"
+            >
+              添加
+            </button>
+          </div>
+          {error && <p className="text-xs text-down">{error}</p>}
+        </div>
+      )}
+
+      {/* Login Prompt */}
+      {!user && (
+        <div className="mx-4 rounded-xl border border-accent-gold/20 bg-accent-gold/5 px-4 py-3">
+          <p className="text-sm text-text-secondary">登录后查看您的自选股列表</p>
+          <button
+            onClick={() => navigate('/login')}
+            className="mt-2 flex items-center gap-1 rounded-lg bg-accent-gold px-3 py-1.5 text-xs font-semibold text-bg-primary"
+          >
+            立即登录
+          </button>
+        </div>
+      )}
+
       {/* List */}
       <div className="space-y-2 px-4">
-        {filtered.length === 0 ? (
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="glass-card h-16 animate-pulse" />
+          ))
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
             <Star size={32} className="mb-2 opacity-30" />
             <p className="text-sm">暂无自选股</p>

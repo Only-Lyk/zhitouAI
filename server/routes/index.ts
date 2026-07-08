@@ -604,6 +604,42 @@ router.get('/api/health', (req, res) => {
   res.json({ status: 'ok', env: process.env.COZE_PROJECT_ENV, timestamp: new Date().toISOString() });
 });
 
+// ========== Watchlist (沙箱 mock) ==========
+
+const MOCK_WATCHLISTS = new Map<number, { code: string; name: string; price: number; change_pct: number }[]>();
+MOCK_WATCHLISTS.set(1, [
+  { code: '600519', name: '贵州茅台', price: 1528.50, change_pct: 1.21 },
+  { code: '002594', name: '比亚迪', price: 268.80, change_pct: 3.31 },
+  { code: '300750', name: '宁德时代', price: 198.50, change_pct: 2.69 },
+  { code: '000333', name: '美的集团', price: 62.35, change_pct: 1.38 },
+]);
+
+router.get('/api/watchlist', authMiddleware, (req: any, res) => {
+  if (!req.currentUser) return res.status(401).json({ error: 'Unauthorized' });
+  const list = MOCK_WATCHLISTS.get(req.currentUser.id) || [];
+  res.json(list);
+});
+
+router.post('/api/watchlist', authMiddleware, (req: any, res) => {
+  if (!req.currentUser) return res.status(401).json({ error: 'Unauthorized' });
+  const { code, name } = req.body || {};
+  if (!code || !name) return res.status(400).json({ error: 'Missing code or name' });
+  const list = MOCK_WATCHLISTS.get(req.currentUser.id) || [];
+  if (list.some((i: any) => i.code === code)) return res.status(400).json({ error: 'Already exists' });
+  list.push({ code, name, price: 0, change_pct: 0 });
+  MOCK_WATCHLISTS.set(req.currentUser.id, list);
+  res.json({ success: true });
+});
+
+router.delete('/api/watchlist/:code', authMiddleware, (req: any, res) => {
+  if (!req.currentUser) return res.status(401).json({ error: 'Unauthorized' });
+  const code = req.params.code;
+  const list = MOCK_WATCHLISTS.get(req.currentUser.id) || [];
+  const filtered = list.filter((i: any) => i.code !== code);
+  MOCK_WATCHLISTS.set(req.currentUser.id, filtered);
+  res.json({ success: true });
+});
+
 // ========== Mock fallback helpers ==========
 
 function generateMockKline(code: string, days = 120) {

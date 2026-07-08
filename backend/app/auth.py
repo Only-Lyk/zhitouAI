@@ -7,7 +7,9 @@ from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from .db import get_db
 
-SECRET_KEY = "zhitou-ai-secret-key-change-in-production"
+import os
+
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "zhitou-ai-dev-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 7
 
