@@ -1,13 +1,46 @@
 import akshare as ak
 import pandas as pd
+import time
+import random
+import requests
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-import asyncio
+import functools
 
 
+# 设置 AKShare 请求头，模拟浏览器
+ak.set_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+
+def retry_on_error(max_retries: int = 3, delay: float = 1.0):
+    """请求重试装饰器"""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    print(f"Attempt {attempt + 1}/{max_retries} failed for {func.__name__}: {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(delay * (attempt + 1) + random.uniform(0, 0.5))
+                    else:
+                        raise
+            return None
+        return wrapper
+    return decorator
+
+
+def _sleep_random(min_sec: float = 0.3, max_sec: float = 1.0):
+    """随机延时，避免请求频率过高"""
+    time.sleep(random.uniform(min_sec, max_sec))
+
+
+@retry_on_error(max_retries=3, delay=1.5)
 def get_market_indices() -> List[Dict[str, Any]]:
     """获取主要大盘指数"""
     try:
+        _sleep_random()
         df = ak.stock_zh_index_spot_em()
         indices = []
         code_map = {
@@ -38,9 +71,54 @@ def get_market_indices() -> List[Dict[str, Any]]:
         ]
 
 
+def _fetch_quote_from_tencent(code: str) -> Optional[Dict[str, Any]]:
+    """从腾讯财经获取个股行情（备选数据源）"""
+    try:
+        prefix = "sh" if code.startswith("6") or code.startswith("5") or code.startswith("9") else "sz"
+        url = f"https://qt.gtimg.cn/q={prefix}{code}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://finance.qq.com/",
+        }
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.encoding = "gbk"
+        text = resp.text
+        if not text or "v_pv_none_match" in text:
+            return None
+        # 解析腾讯返回的格式: v_sh600519="1~贵州茅台~600519~..."
+        parts = text.split('"')
+        if len(parts) < 2:
+            return None
+        data = parts[1].split("~")
+        if len(data) < 45:
+            return None
+        return {
+            "code": code,
+            "name": data[1],
+            "price": float(data[3]) if data[3] else 0,
+            "change": float(data[4]) if data[4] else 0,
+            "change_pct": float(data[5]) if data[5] else 0,
+            "volume": float(data[6]) / 100 if data[6] else 0,
+            "market_cap": float(data[17]) / 1e8 if data[17] else None,
+            "pe": float(data[39]) if data[39] else None,
+            "pb": float(data[46]) if data[46] else None,
+        }
+    except Exception as e:
+        print(f"Tencent quote fetch error for {code}: {e}")
+        return None
+
+
+@retry_on_error(max_retries=2, delay=1.0)
 def get_stock_quote(code: str) -> Dict[str, Any]:
     """获取单只股票行情"""
+    # 先尝试腾讯接口（更稳定）
+    tencent_data = _fetch_quote_from_tencent(code)
+    if tencent_data:
+        return tencent_data
+
+    #  fallback 到 AKShare
     try:
+        _sleep_random()
         df = ak.stock_zh_a_spot_em()
         row = df[df["代码"] == code]
         if len(row) == 0:
@@ -79,9 +157,49 @@ def _mock_stock_quote(code: str) -> Dict[str, Any]:
     }
 
 
+def _fetch_kline_from_tencent(code: str, days: int = 120) -> List[Dict[str, Any]]:
+    """从腾讯财经获取K线数据（备选数据源）"""
+    try:
+        prefix = "sh" if code.startswith("6") or code.startswith("5") or code.startswith("9") else "sz"
+        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={prefix}{code},day,,,{days},qfq"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://finance.qq.com/",
+        }
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.encoding = "gbk"
+        data = resp.json()
+        key = f"{prefix}{code}"
+        if "data" not in data or key not in data["data"]:
+            return []
+        day_data = data["data"][key].get("qfqday", data["data"][key].get("day", []))
+        klines = []
+        for item in day_data:
+            klines.append({
+                "date": item[0],
+                "open": float(item[1]),
+                "close": float(item[2]),
+                "low": float(item[3]),
+                "high": float(item[4]),
+                "volume": float(item[5]) / 10000,
+            })
+        return klines
+    except Exception as e:
+        print(f"Tencent kline fetch error for {code}: {e}")
+        return []
+
+
+@retry_on_error(max_retries=2, delay=1.0)
 def get_kline_data(code: str, period: str = "daily", days: int = 120) -> List[Dict[str, Any]]:
     """获取K线数据"""
+    # 先尝试腾讯接口（更稳定）
+    tencent_kline = _fetch_kline_from_tencent(code, days)
+    if tencent_kline and len(tencent_kline) > 0:
+        return tencent_kline
+
+    # fallback 到 AKShare
     try:
+        _sleep_random()
         if period == "daily":
             df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date="20240101", adjust="qfq")
         else:
@@ -177,9 +295,11 @@ def calculate_indicators(klines: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+@retry_on_error(max_retries=2, delay=1.0)
 def search_stocks(keyword: str) -> List[Dict[str, Any]]:
     """搜索股票"""
     try:
+        _sleep_random()
         df = ak.stock_zh_a_spot_em()
         df = df[df["名称"].str.contains(keyword, na=False) | df["代码"].str.contains(keyword, na=False)]
         results = []
@@ -196,9 +316,11 @@ def search_stocks(keyword: str) -> List[Dict[str, Any]]:
         return []
 
 
+@retry_on_error(max_retries=2, delay=1.0)
 def get_hot_sectors() -> List[Dict[str, Any]]:
     """获取热点板块"""
     try:
+        _sleep_random()
         df = ak.stock_sector_spot_em()
         sectors = []
         for _, r in df.head(10).iterrows():
