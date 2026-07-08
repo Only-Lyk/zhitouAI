@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { Send, Bot, User, Loader2 } from 'lucide-react';
 
 interface Message {
@@ -10,6 +11,8 @@ interface Message {
 
 export default function ChatPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { token } = useAuth();
   const stockCode = searchParams.get('stock');
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -42,10 +45,18 @@ export default function ChatPage() {
     const assistantId = (Date.now() + 1).toString();
     setMessages((prev) => [...prev, { role: 'assistant', content: '', id: assistantId }]);
 
+    if (!token) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === assistantId ? { ...m, content: '请先登录后再使用AI助手。' } : m))
+      );
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ message: userMsg.content, history: [] }),
       });
 

@@ -81,3 +81,64 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = []
+
+
+# ========== Auth & User ==========
+
+class UserRegister(BaseModel):
+    username: str
+    email: str
+    password: str
+
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    is_admin: int = 0
+
+
+class CreditInfo(BaseModel):
+    balance: int
+    total_consumed: int
+    total_recharged: int
+
+
+class TransactionRecord(BaseModel):
+    id: int
+    user_id: int
+    type: str
+    amount: int
+    description: str
+    created_at: datetime
+
+
+# ========== Admin ==========
+
+class AdminSetting(BaseModel):
+    key: str
+    value: str
+    updated_at: datetime
+
+
+class AdminSettingsUpdate(BaseModel):
+    settings: dict
+
+
+class AdminUserList(BaseModel):
+    users: List[dict]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminTransactionList(BaseModel):
+    transactions: List[dict]
+    total: int
+    page: int
+    page_size: int

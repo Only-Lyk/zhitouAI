@@ -154,20 +154,27 @@ def _mock_stock_quote(code: str) -> Dict[str, Any]:
     }
 
 
-def _fetch_kline_from_tencent(code: str, days: int = 120) -> List[Dict[str, Any]]:
+PERIOD_MAP = {"daily": "day", "weekly": "week", "monthly": "month"}
+
+
+def _fetch_kline_from_tencent(code: str, period: str = "day", days: int = 120) -> List[Dict[str, Any]]:
     """从腾讯财经获取K线数据"""
     try:
         prefix = _get_tencent_prefix(code)
-        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={prefix}{code},day,,,{days},qfq"
+        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={prefix}{code},{period},,,{days},qfq"
         resp = requests.get(url, headers=TENCENT_HEADERS, timeout=15)
         resp.encoding = "gbk"
         data = resp.json()
         key = f"{prefix}{code}"
         if "data" not in data or key not in data["data"]:
             return []
-        day_data = data["data"][key].get("qfqday", data["data"][key].get("day", []))
+        # 根据周期选择数据键
+        data_key = f"qfq{period}" if period != "day" else "qfqday"
+        if data_key not in data["data"][key]:
+            data_key = period if period != "day" else "day"
+        raw_data = data["data"][key].get(data_key, [])
         klines = []
-        for item in day_data:
+        for item in raw_data:
             klines.append({
                 "date": item[0],
                 "open": float(item[1]),
@@ -178,14 +185,15 @@ def _fetch_kline_from_tencent(code: str, days: int = 120) -> List[Dict[str, Any]
             })
         return klines
     except Exception as e:
-        print(f"Tencent kline fetch error for {code}: {e}")
+        print(f"Tencent kline fetch error for {code} ({period}): {e}")
         return []
 
 
 @retry_on_error(max_retries=2, delay=1.0)
 def get_kline_data(code: str, period: str = "daily", days: int = 120) -> List[Dict[str, Any]]:
-    """获取K线数据"""
-    tencent_kline = _fetch_kline_from_tencent(code, days)
+    """获取K线数据，支持 daily/weekly/monthly"""
+    tencent_period = PERIOD_MAP.get(period, "day")
+    tencent_kline = _fetch_kline_from_tencent(code, tencent_period, days)
     if tencent_kline and len(tencent_kline) > 0:
         return tencent_kline
     return _mock_kline(code, days)

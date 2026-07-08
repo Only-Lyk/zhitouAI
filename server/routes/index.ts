@@ -307,19 +307,6 @@ router.get('/api/stock/quote', async (req, res) => {
   }
 });
 
-router.get('/api/stock/kline', async (req, res) => {
-  const code = req.query.code as string;
-  const days = parseInt(req.query.days as string) || 120;
-  if (!code) return res.status(400).json({ error: 'Missing code' });
-
-  const klines = await fetchTxKline(code, days);
-  if (klines.length > 0) {
-    return res.json(klines);
-  }
-  // fallback mock
-  res.json(generateMockKline(code, days));
-});
-
 router.get('/api/stock/indicators', async (req, res) => {
   const code = req.query.code as string;
   if (!code) return res.status(400).json({ error: 'Missing code' });
@@ -513,6 +500,96 @@ router.post('/api/ai/chat', (req, res) => {
     res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
     i += 4;
   }, 15);
+});
+
+// ========== Auth / Credit / Admin (沙箱预览用 mock) ==========
+
+const MOCK_USERS = new Map<string, { id: number; username: string; password: string; is_admin: boolean; credits: number }>();
+// 沙箱预览默认 admin 用户（token mock_jwt_1_admin 可直接使用）
+MOCK_USERS.set('admin', { id: 1, username: 'admin', password: 'admin123', is_admin: true, credits: 99999 });
+
+function makeToken(user: any) {
+  return `mock_jwt_${user.id}_${Date.now()}`;
+}
+
+function authMiddleware(req: any, res: any, next: any) {
+  const auth = req.headers.authorization || '';
+  req.currentUser = null;
+  if (auth.startsWith('Bearer ')) {
+    const token = auth.slice(7);
+    for (const u of MOCK_USERS.values()) {
+      if (token.includes(`_${u.id}_`)) {
+        req.currentUser = { id: u.id, username: u.username, is_admin: u.is_admin };
+        break;
+      }
+    }
+  }
+  next();
+}
+
+router.post('/api/auth/register', (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'Missing username or password' });
+  for (const u of MOCK_USERS.values()) {
+    if (u.username === username) return res.status(400).json({ error: 'Username already exists' });
+  }
+  const id = MOCK_USERS.size + 1;
+  const isAdmin = username === 'admin';
+  const user = { id, username, password, is_admin: isAdmin, credits: isAdmin ? 99999 : 100 };
+  MOCK_USERS.set(username, user);
+  res.json({ access_token: makeToken(user), token_type: 'bearer', user: { id, username, is_admin: isAdmin } });
+});
+
+router.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  const user = MOCK_USERS.get(username);
+  if (!user || user.password !== password) return res.status(401).json({ error: 'Invalid credentials' });
+  res.json({ access_token: makeToken(user), token_type: 'bearer', user: { id: user.id, username: user.username, is_admin: user.is_admin } });
+});
+
+router.get('/api/auth/me', authMiddleware, (req: any, res) => {
+  if (!req.currentUser) return res.status(401).json({ error: 'Unauthorized' });
+  const user = MOCK_USERS.get(req.currentUser.username);
+  if (!user) return res.status(401).json({ error: 'User not found' });
+  res.json({ id: user.id, username: user.username, is_admin: user.is_admin, credits: user.credits });
+});
+
+router.get('/api/credit/balance', authMiddleware, (req: any, res) => {
+  if (!req.currentUser) return res.status(401).json({ error: 'Unauthorized' });
+  const user = MOCK_USERS.get(req.currentUser.username);
+  res.json({ credits: user?.credits || 0 });
+});
+
+router.get('/api/credit/transactions', authMiddleware, (req: any, res) => {
+  res.json({ transactions: [] });
+});
+
+router.post('/api/admin/settings', authMiddleware, (req: any, res) => {
+  if (!req.currentUser?.is_admin) return res.status(403).json({ error: 'Forbidden' });
+  res.json({ success: true });
+});
+
+router.get('/api/admin/settings', authMiddleware, (req: any, res) => {
+  if (!req.currentUser?.is_admin) return res.status(403).json({ error: 'Forbidden' });
+  res.json({ ai_chat_cost: 5, ai_diagnose_cost: 10, signup_bonus: 100, daily_checkin_bonus: 5 });
+});
+
+router.get('/api/admin/users', authMiddleware, (req: any, res) => {
+  if (!req.currentUser?.is_admin) return res.status(403).json({ error: 'Forbidden' });
+  const users = Array.from(MOCK_USERS.values()).map(u => ({ id: u.id, username: u.username, is_admin: u.is_admin, credits: u.credits }));
+  res.json({ users });
+});
+
+// 让 AI 诊断和聊天也支持 period 参数（兼容前端调用）
+router.get('/api/stock/kline', async (req, res) => {
+  const code = req.query.code as string;
+  const days = parseInt(req.query.days as string) || 120;
+  const period = (req.query.period as string) || 'day';
+  // 沙箱忽略 period 映射，直接返回日线
+  if (!code) return res.status(400).json({ error: 'Missing code' });
+  const klines = await fetchTxKline(code, days);
+  if (klines.length > 0) return res.json(klines);
+  res.json(generateMockKline(code, days));
 });
 
 router.get('/api/health', (req, res) => {

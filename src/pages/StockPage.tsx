@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, TrendingUp, TrendingDown, Activity, BarChart3, Brain } from 'lucide-react';
 import KLineChart from '../components/KLineChart';
@@ -50,6 +50,21 @@ interface Diagnosis {
   suggestion: string;
 }
 
+type Period = 'day' | 'week' | 'month';
+
+function calcSMA(values: number[], n: number): (number | null)[] {
+  const res: (number | null)[] = [];
+  for (let i = 0; i < values.length; i++) {
+    if (i < n - 1) {
+      res.push(null);
+      continue;
+    }
+    const sum = values.slice(i - n + 1, i + 1).reduce((a, b) => a + b, 0);
+    res.push(Math.round((sum / n) * 100) / 100);
+  }
+  return res;
+}
+
 export default function StockPage() {
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
@@ -59,14 +74,15 @@ export default function StockPage() {
   const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'chart' | 'indicators' | 'ai'>('chart');
+  const [period, setPeriod] = useState<Period>('day');
 
   useEffect(() => {
     if (!code) return;
     setLoading(true);
     Promise.all([
       fetch(`/api/stock/quote?code=${code}`).then((r) => r.json()),
-      fetch(`/api/stock/kline?code=${code}&days=120`).then((r) => r.json()),
-      fetch(`/api/stock/indicators?code=${code}`).then((r) => r.json()),
+      fetch(`/api/stock/kline?code=${code}&days=120&period=${period}`).then((r) => r.json()),
+      fetch(`/api/stock/indicators?code=${code}&period=${period}`).then((r) => r.json()),
       fetch(`/api/ai/diagnose?code=${code}`).then((r) => r.json()),
     ])
       .then(([q, k, i, d]) => {
@@ -77,7 +93,17 @@ export default function StockPage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [code]);
+  }, [code, period]);
+
+  const ma5Series = useMemo(() => {
+    if (!klines.length) return [];
+    return calcSMA(klines.map((k) => k.close), 5);
+  }, [klines]);
+
+  const ma20Series = useMemo(() => {
+    if (!klines.length) return [];
+    return calcSMA(klines.map((k) => k.close), 20);
+  }, [klines]);
 
   if (loading || !quote) {
     return (
@@ -88,6 +114,7 @@ export default function StockPage() {
   }
 
   const isUp = quote.change_pct >= 0;
+  const periodLabels: Record<Period, string> = { day: '日K', week: '周K', month: '月K' };
 
   return (
     <div className="animate-slide-up">
@@ -167,10 +194,26 @@ export default function StockPage() {
       <div className="px-4 py-4">
         {activeTab === 'chart' && (
           <div className="glass-card p-3">
+            {/* Period Switcher */}
+            <div className="mb-3 flex items-center justify-center gap-2">
+              {( ['day', 'week', 'month'] as Period[] ).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                    period === p
+                      ? 'bg-accent-gold text-bg-primary'
+                      : 'bg-bg-tertiary text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  {periodLabels[p]}
+                </button>
+              ))}
+            </div>
             <KLineChart
               data={klines}
-              ma5={klines.map((_, i) => (i >= 4 ? indicators.ma5 : null)) as (number | null)[]}
-              ma20={klines.map((_, i) => (i >= 19 ? indicators.ma20 : null)) as (number | null)[]}
+              ma5={ma5Series}
+              ma20={ma20Series}
             />
             <div className="mt-2 flex items-center justify-center gap-4 text-[10px] text-text-tertiary">
               <span className="flex items-center gap-1"><span className="inline-block h-1 w-3 rounded bg-accent-gold" />MA5</span>

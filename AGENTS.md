@@ -6,11 +6,11 @@
 
 ## 技术栈
 
-- **前端**: Vite 7, React 19, TypeScript, Tailwind CSS, Recharts
+- **前端**: Vite 7, React 19, TypeScript, Tailwind CSS, TradingView Lightweight Charts
 - **沙箱开发后端**: Express + TypeScript（提供Mock API用于预览）
-- **生产部署后端**: Python 3.10+, FastAPI, AKShare, pandas, uvicorn
+- **生产部署后端**: Python 3.10+, FastAPI, pandas, uvicorn, httpx（直接调用腾讯接口）
 - **数据库**: SQLite（10人规模足够）
-- **AI**: 大语言模型流式对话（DeepSeek/豆包等），当前为模拟流式输出
+- **AI**: 大语言模型流式对话（DeepSeek/豆包等），通过环境变量配置 LLM_API_KEY
 
 ## 目录结构
 
@@ -19,8 +19,12 @@
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── models.py      # Pydantic 数据模型
-│   │   ├── data_service.py # AKShare 数据获取与指标计算
-│   │   ├── ai_service.py   # AI 分析与推荐逻辑
+│   │   ├── db.py          # SQLite 数据库连接与初始化
+│   │   ├── auth.py        # JWT 认证、密码哈希
+│   │   ├── data_service.py # 腾讯接口数据获取与指标计算
+│   │   ├── ai_service.py   # AI 分析与推荐逻辑（httpx 调用 LLM）
+│   │   ├── credit_service.py # 积分余额、消耗、充值
+│   │   ├── admin_service.py  # 管理员配置读写
 │   │   └── api.py          # FastAPI 路由
 │   ├── main.py          # FastAPI 入口
 │   └── requirements.txt # Python 依赖
@@ -33,6 +37,8 @@
 │   ├── main.tsx         # React 入口
 │   ├── App.tsx          # 路由配置
 │   ├── index.css        # 全局样式 + Tailwind
+│   ├── context/         # 全局状态
+│   │   └── AuthContext.tsx # JWT 认证状态管理
 │   ├── components/      # 公共组件
 │   │   ├── Layout.tsx
 │   │   ├── BottomNav.tsx
@@ -45,7 +51,9 @@
 │       ├── StockPage.tsx
 │       ├── AIPage.tsx
 │       ├── ChatPage.tsx
-│       └── WatchlistPage.tsx
+│       ├── WatchlistPage.tsx
+│       ├── LoginPage.tsx   # 登录/注册
+│       └── AdminPage.tsx   # 管理后台
 ├── public/             # 静态资源
 │   ├── manifest.json    # PWA 配置
 │   └── icon-*.svg       # PWA 图标
@@ -88,10 +96,19 @@
 | `/api/stock/kline?code=` | GET | K线数据 |
 | `/api/stock/indicators?code=` | GET | 技术指标 |
 | `/api/stock/search?keyword=` | GET | 搜索股票 |
-| `/api/ai/diagnose?code=` | GET | AI诊断（非流式） |
-| `/api/ai/diagnose/stream?code=` | GET | AI诊断（SSE流式） |
-| `/api/ai/recommendations` | GET | AI每日推荐 |
-| `/api/ai/chat` | POST | AI问答（SSE流式） |
+| `/api/ai/diagnose?code=` | GET | AI诊断（非流式，需登录扣积分） |
+| `/api/ai/diagnose/stream?code=` | GET | AI诊断（SSE流式，需登录扣积分） |
+| `/api/ai/recommendations` | GET | AI每日推荐（需登录扣积分） |
+| `/api/ai/chat` | POST | AI问答（SSE流式，需登录扣积分） |
+| `/api/auth/register` | POST | 用户注册 |
+| `/api/auth/login` | POST | 用户登录 |
+| `/api/auth/me` | GET | 获取当前用户信息 |
+| `/api/credit/balance` | GET | 查询积分余额 |
+| `/api/credit/transactions` | GET | 积分交易记录 |
+| `/api/admin/settings` | GET/POST | 管理员读取/修改配置 |
+| `/api/admin/users` | GET | 管理员查看用户列表 |
+| `/api/admin/transactions` | GET | 管理员查看交易记录 |
+| `/api/admin/recharge` | POST | 管理员给用户充值积分 |
 
 ## Windows 服务器部署指南
 

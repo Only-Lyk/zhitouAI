@@ -98,7 +98,7 @@ export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
     if (ma5) {
       const ma5Series = chart.addSeries(LineSeries, {
         color: '#D4A853',
-        lineWidth: 1.5,
+        lineWidth: 2,
         title: 'MA5',
         lastValueVisible: false,
       });
@@ -108,7 +108,7 @@ export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
     if (ma20) {
       const ma20Series = chart.addSeries(LineSeries, {
         color: '#3B82F6',
-        lineWidth: 1.5,
+        lineWidth: 2,
         title: 'MA20',
         lastValueVisible: false,
       });
@@ -138,7 +138,7 @@ export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
     if (!data.length || !candleSeriesRef.current || !volumeSeriesRef.current) return;
 
     const candleData: CandlestickData[] = data.map((d) => ({
-      time: d.date as unknown as number,
+      time: d.date,
       open: d.open,
       high: d.high,
       low: d.low,
@@ -146,7 +146,7 @@ export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
     }));
 
     const volumeData: HistogramData[] = data.map((d) => ({
-      time: d.date as unknown as number,
+      time: d.date,
       value: d.volume,
       color: d.close >= d.open ? 'rgba(16,185,129,0.5)' : 'rgba(239,68,68,0.5)',
     }));
@@ -159,7 +159,7 @@ export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
         .map((d, i) => {
           const val = ma5[i];
           return val != null
-            ? ({ time: d.date as unknown as number, value: val } as LineData)
+            ? ({ time: d.date, value: val } as LineData)
             : null;
         })
         .filter(Boolean) as LineData[];
@@ -171,7 +171,7 @@ export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
         .map((d, i) => {
           const val = ma20[i];
           return val != null
-            ? ({ time: d.date as unknown as number, value: val } as LineData)
+            ? ({ time: d.date, value: val } as LineData)
             : null;
         })
         .filter(Boolean) as LineData[];

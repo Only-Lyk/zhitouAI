@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { Sparkles, RefreshCw } from 'lucide-react';
 import StockCard from '../components/StockCard';
 
@@ -14,6 +15,7 @@ interface Recommendation {
 }
 
 export default function AIPage() {
+  const { token } = useAuth();
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -21,7 +23,9 @@ export default function AIPage() {
   const fetchData = async () => {
     setRefreshing(true);
     try {
-      const res = await fetch('/api/ai/recommendations');
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/ai/recommendations', { headers });
       const data = await res.json();
       setRecommendations(data);
     } catch (e) {
