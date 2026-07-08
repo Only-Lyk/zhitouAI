@@ -6,7 +6,6 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
-import viteConfig from '../vite.config';
 
 const isDev = process.env.COZE_PROJECT_ENV !== 'PROD';
 
@@ -15,9 +14,7 @@ const isDev = process.env.COZE_PROJECT_ENV !== 'PROD';
  */
 export async function setupViteMiddleware(app: Application) {
   const vite = await createViteServer({
-    ...viteConfig,
     server: {
-      ...viteConfig.server,
       middlewareMode: true,
     },
     appType: 'spa',
