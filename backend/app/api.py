@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from . import data_service, ai_service
 from .models import (
     MarketIndex, StockBasic, AIDiagnosisResult, AIRecommendation, ChatRequest,
