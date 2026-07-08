@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Flame, ChevronRight, Sparkles } from 'lucide-react';
+import { Search, Flame, ChevronRight, Sparkles, LogIn, User } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import MarketOverview from '../components/MarketOverview';
 import StockCard from '../components/StockCard';
 
@@ -23,6 +24,7 @@ interface Sector {
 
 export default function HomePage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [sectors, setSectors] = useState<Sector[]>([]);
@@ -72,6 +74,30 @@ export default function HomePage() {
           />
         </div>
       </form>
+
+      {/* Login banner */}
+      {!user && (
+        <div className="mx-4 rounded-xl border border-accent-gold/20 bg-accent-gold/5 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-gold/20">
+                <User size={16} className="text-accent-gold" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-text-primary">登录解锁 AI 分析</p>
+                <p className="text-xs text-text-tertiary">智能选股、量化诊断、AI 问答</p>
+              </div>
+            </div>
+            <button
+              onClick={() => navigate('/login')}
+              className="flex items-center gap-1 rounded-lg bg-accent-gold px-3 py-1.5 text-xs font-semibold text-bg-primary shadow-[0_0_12px_rgba(212,168,83,0.35)] transition-all hover:shadow-[0_0_16px_rgba(212,168,83,0.5)] active:scale-95"
+            >
+              <LogIn size={14} />
+              登录
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Market Indices */}
       <section>

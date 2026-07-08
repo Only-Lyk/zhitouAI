@@ -2,7 +2,7 @@ import { ReactNode, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import BottomNav from './BottomNav';
-import { LogOut, User, Shield, Coins } from 'lucide-react';
+import { LogOut, User, Shield, Coins, LogIn } from 'lucide-react';
 
 interface LayoutProps {
   children: ReactNode;
@@ -61,8 +61,9 @@ export default function Layout({ children }: LayoutProps) {
           ) : (
             <button
               onClick={() => navigate('/login')}
-              className="rounded-lg bg-accent-gold px-3 py-1.5 text-xs font-semibold text-bg-primary transition-opacity hover:opacity-90"
+              className="flex items-center gap-1 rounded-lg bg-accent-gold px-3 py-1.5 text-xs font-semibold text-bg-primary shadow-[0_0_12px_rgba(212,168,83,0.35)] transition-all hover:shadow-[0_0_16px_rgba(212,168,83,0.5)] active:scale-95"
             >
+              <LogIn size={14} />
               登录
             </button>
           )}
