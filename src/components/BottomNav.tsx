@@ -1,8 +1,9 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Home, Star, Sparkles, MessageCircle } from 'lucide-react';
+import { Home, Star, Sparkles, MessageCircle, BarChart3 } from 'lucide-react';
 
 const tabs = [
   { path: '/', icon: Home, label: '首页' },
+  { path: '/stocks', icon: BarChart3, label: '行情' },
   { path: '/watchlist', icon: Star, label: '自选' },
   { path: '/ai', icon: Sparkles, label: 'AI推荐' },
   { path: '/chat', icon: MessageCircle, label: 'AI助手' },

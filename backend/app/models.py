@@ -84,6 +84,11 @@ class ChatRequest(BaseModel):
     model: Optional[str] = None
 
 
+class WatchlistAdd(BaseModel):
+    code: str
+    name: str = ""
+
+
 
 # ========== Auth & User ==========
 

@@ -48,6 +48,174 @@ CHAT_PROMPT = """你是一位资深股票分析师，擅长技术分析和基本
 用户问题："""
 
 
+REC_SYSTEM = """你是一位拥有20年经验的资深量化分析师。请基于客观数据，对候选股票给出简明、专业、可操作的解读。"""
+
+def _resolve_default_model_config() -> Dict[str, Any]:
+    from .admin_service import get_models_config
+    models = get_models_config().get("models", [])
+    if not models:
+        return None
+    return next((m for m in models if m.get("default")), models[0])
+
+
+def _score_stock(s: Dict[str, Any]) -> int:
+    score = 50
+    cp = s.get("change_pct") or 0
+    if cp > 5:
+        score += 15
+    elif cp > 2:
+        score += 8
+    elif cp > 0:
+        score += 3
+    elif cp < -3:
+        score -= 10
+    pe = s.get("pe")
+    if pe and pe > 0:
+        if pe < 15:
+            score += 10
+        elif pe < 30:
+            score += 5
+        elif pe > 60:
+            score -= 8
+    mc = s.get("market_cap") or 0
+    if mc > 1000:
+        score += 5
+    elif mc < 50:
+        score -= 5
+    to = s.get("turnover") or 0
+    if to > 3:
+        score += 3
+    return max(0, min(100, score))
+
+
+def _signal_from_score(score: int) -> str:
+    if score >= 75:
+        return "强烈关注"
+    if score >= 60:
+        return "值得关注"
+    if score >= 40:
+        return "中性观望"
+    return "谨慎回避"
+
+
+def _risk_from_score(score: int) -> str:
+    if score >= 75:
+        return "低"
+    if score >= 60:
+        return "中"
+    if score >= 40:
+        return "中"
+    return "高"
+
+
+def _default_reason(s: Dict[str, Any], score: int) -> str:
+    cp = s.get("change_pct") or 0
+    pe = s.get("pe")
+    parts = []
+    if cp > 0:
+        parts.append(f"当日上涨{cp:.2f}%")
+    elif cp < 0:
+        parts.append(f"当日下跌{abs(cp):.2f}%")
+    if pe:
+        parts.append(f"PE {pe:.1f}")
+    parts.append(f"综合评分 {score}")
+    return "；".join(parts) + "。"
+
+
+def _build_rec_prompt(stocks: List[Dict[str, Any]]) -> str:
+    lines = "\n".join(
+        f"{s['code']} {s['name']} 涨跌幅={s.get('change_pct')} PE={s.get('pe')} "
+        f"总市值(亿)={s.get('market_cap')} 换手率={s.get('turnover')}"
+        for s in stocks
+    )
+    return (
+        "以下是今日A股量化初筛出的候选（已按综合评分排序）：\n"
+        f"{lines}\n\n"
+        "请为每只股票输出一句简明AI解读（不超过45字）、信号（强烈关注/值得关注/中性观望/谨慎回避）、"
+        "风险等级（低/中/高）。严格只输出JSON数组，不要任何额外文字：\n"
+        '[{"code":"600519","reason":"...","signal":"值得关注","risk_level":"中"}]'
+    )
+
+
+def _parse_rec_json(text: str) -> Dict[str, Dict[str, str]]:
+    if not text:
+        return {}
+    t = text.strip()
+    if "```" in t:
+        t = t.split("```")[1]
+        if t.startswith("json"):
+            t = t[4:]
+    start = t.find("[")
+    end = t.rfind("]")
+    if start == -1 or end == -1:
+        return {}
+    try:
+        arr = json.loads(t[start:end + 1])
+    except Exception:
+        return {}
+    out: Dict[str, Dict[str, str]] = {}
+    for item in arr:
+        code = item.get("code")
+        if code:
+            out[code] = {
+                "reason": item.get("reason", ""),
+                "signal": item.get("signal", ""),
+                "risk_level": item.get("risk_level", ""),
+            }
+    return out
+
+
+def _rows_to_recs(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "code": r["code"],
+            "name": r["name"],
+            "price": r["price"],
+            "change_pct": r["change_pct"],
+            "score": r["score"],
+            "signal": r["signal"],
+            "reason": r["reason"],
+            "risk_level": r["risk_level"],
+        }
+        for r in rows
+    ]
+
+
+async def _call_llm_once(system: str, user: str, model_config: Dict[str, Any]) -> str:
+    """调用外部 LLM（非流式），返回完整文本"""
+    if not model_config.get("api_key"):
+        return ""
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": user})
+    payload = {
+        "model": model_config.get("model_id", model_config.get("id", "deepseek-chat")),
+        "messages": messages,
+        "stream": False,
+        "temperature": 0.7,
+        "max_tokens": 1500,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {model_config['api_key']}",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{model_config['base_url']}/v1/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            if resp.status_code != 200:
+                return ""
+            data = resp.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    except Exception as e:
+        print(f"LLM once call error: {e}")
+        return ""
+
+
 async def _call_llm_stream(system: str, user: str, model_config: Dict[str, Any]) -> AsyncGenerator[str, None]:
     """调用外部 LLM API（SSE 流式），同时返回 token usage"""
     if not model_config.get("api_key"):
@@ -198,6 +366,26 @@ async def diagnose_stock(code: str) -> Dict[str, Any]:
     }
 
 
+async def _stream_rule_based(code: str) -> AsyncGenerator[str, None]:
+    """本地规则诊断的逐字流式输出（LLM不可用时的兜底）"""
+    result = await diagnose_stock(code)
+    sections = [
+        f"正在分析 {result['name']}({code})...\n\n",
+        f"【综合评分】{result['score']}/100\n",
+        f"【信号判断】{result['signal']}\n",
+        f"【趋势判断】{result['trend']}\n\n",
+        f"【技术解读】\n{result['reason']}\n\n",
+        f"【关键价位】\n支撑位：{result['support']} 元\n压力位：{result['pressure']} 元\n\n",
+        f"【操作建议】\n{result['suggestion']}\n\n",
+        f"【风险提示】\n当前风险等级：{result['risk_level']}。",
+        " 股票投资有风险，以上分析仅供参考，不构成投资建议。",
+    ]
+    for section in sections:
+        for char in section:
+            yield char
+            await asyncio.sleep(0.008)
+
+
 async def diagnose_stock_stream(code: str, model_config: Dict[str, Any] = None) -> AsyncGenerator[str, None]:
     """流式AI诊断输出（优先LLM，兜底本地规则）"""
     from .admin_service import get_models_config
@@ -207,23 +395,7 @@ async def diagnose_stock_stream(code: str, model_config: Dict[str, Any] = None) 
         model_config = next((m for m in models if m.get("default")), models[0] if models else None)
 
     if not model_config or not model_config.get("api_key"):
-        # 模拟流式输出
-        result = await diagnose_stock(code)
-        sections = [
-            f"正在分析 {result['name']}({code})...\n\n",
-            f"【综合评分】{result['score']}/100\n",
-            f"【信号判断】{result['signal']}\n",
-            f"【趋势判断】{result['trend']}\n\n",
-            f"【技术解读】\n{result['reason']}\n\n",
-            f"【关键价位】\n支撑位：{result['support']} 元\n压力位：{result['pressure']} 元\n\n",
-            f"【操作建议】\n{result['suggestion']}\n\n",
-            f"【风险提示】\n当前风险等级：{result['risk_level']}。",
-            " 股票投资有风险，以上分析仅供参考，不构成投资建议。",
-        ]
-        for section in sections:
-            for char in section:
-                yield char
-                await asyncio.sleep(0.008)
+        yield from _stream_rule_based(code)
         return
 
     quote = get_stock_quote(code)
@@ -249,29 +421,79 @@ RSI(14)：{indicators.get('rsi14', 'N/A')}
 布林下轨：{indicators.get('boll_down', 'N/A')}
 """
 
+    buffer = ""
     async for chunk in _call_llm_stream("", user_prompt, model_config):
+        buffer += chunk
         yield chunk
+    # 若 LLM 未返回有效内容，回退到本地规则诊断，避免空输出
+    if not buffer.strip():
+        yield from _stream_rule_based(code)
 
 
 
 async def get_daily_recommendations() -> List[Dict[str, Any]]:
-    """每日AI选股推荐"""
-    watchlist = ["600519", "000858", "002594", "300750", "000333", "600036", "601318", "600276"]
+    """每日AI选股：全市场扫描 + 量化打分 + LLM解读，结果按日缓存到数据库。"""
+    from . import db
+    from datetime import date as _date
+
+    today = _date.today().isoformat()
+    cached = db.get_recommendation_history(today)
+    if cached:
+        return _rows_to_recs(cached)
+
+    stocks = get_all_a_shares()
+    candidates = []
+    for s in stocks:
+        name = s.get("name", "")
+        if not name or "ST" in name or name.startswith("*"):
+            continue
+        mc = s.get("market_cap") or 0
+        pe = s.get("pe")
+        if mc < 30:
+            continue
+        if pe is None or pe <= 0:
+            continue
+        if (s.get("change_pct") or 0) <= -5:
+            continue
+        score = _score_stock(s)
+        candidates.append((score, s))
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    top = candidates[:12]
+
+    model_config = _resolve_default_model_config()
+    reasons: Dict[str, Dict[str, str]] = {}
+    if model_config and model_config.get("api_key") and top:
+        prompt = _build_rec_prompt([s for _, s in top])
+        text = await _call_llm_once(REC_SYSTEM, prompt, model_config)
+        reasons = _parse_rec_json(text)
+
     recommendations = []
-    for code in watchlist[:6]:
-        diag = await diagnose_stock(code)
-        quote = get_stock_quote(code)
+    for score, s in top:
+        code = s["code"]
+        name = s["name"]
+        info = reasons.get(code, {})
+        reason = info.get("reason") or _default_reason(s, score)
+        signal = info.get("signal") or _signal_from_score(score)
+        risk = info.get("risk_level") or _risk_from_score(score)
         recommendations.append({
             "code": code,
-            "name": quote["name"],
-            "price": quote["price"],
-            "change_pct": quote["change_pct"],
-            "score": diag["score"],
-            "signal": diag["signal"],
-            "reason": diag["reason"].split("。")[0] + "。" if diag["reason"] else "",
-            "risk_level": diag["risk_level"],
+            "name": name,
+            "price": s.get("price"),
+            "change_pct": s.get("change_pct"),
+            "score": score,
+            "signal": signal,
+            "reason": reason,
+            "risk_level": risk,
+            "metrics": {
+                "pe": s.get("pe"),
+                "market_cap": s.get("market_cap"),
+                "turnover": s.get("turnover"),
+            },
         })
-    recommendations.sort(key=lambda x: x["score"], reverse=True)
+
+    # 落库，供"昨日推荐对比"使用
+    db.save_recommendation_history(today, recommendations)
     return recommendations
 
 

@@ -1,13 +1,18 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, TrendingUp, TrendingDown, Activity, BarChart3, Brain } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, Activity, BarChart3, Brain, Star } from 'lucide-react';
 import { calcSMA } from '../utils/indicators';
 import KLineChart from '../components/KLineChart';
 import AIScoreBadge from '../components/AIScoreBadge';
+import { useAuth } from '../context/AuthContext';
+import { addToWatchlist, removeFromWatchlist, getWatchlist } from '../utils/watchlist';
 
 export default function StockPage() {
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
+  const { token } = useAuth();
+  const [inWatchlist, setInWatchlist] = useState(false);
+  const [watchBusy, setWatchBusy] = useState(false);
   const [quote, setQuote] = useState<StockQuote | null>(null);
   const [klines, setKlines] = useState<KLineData[]>([]);
   const [indicators, setIndicators] = useState<Indicators>({});
@@ -23,7 +28,7 @@ export default function StockPage() {
       fetch(`/api/stock/quote?code=${code}`).then((r) => (r.ok ? r.json() : null)),
       fetch(`/api/stock/kline?code=${code}&days=120&period=${period}`).then((r) => (r.ok ? r.json() : [])),
       fetch(`/api/stock/indicators?code=${code}&period=${period}`).then((r) => (r.ok ? r.json() : null)),
-      fetch(`/api/ai/diagnose?code=${code}`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`/api/ai/diagnose?code=${code}`, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined).then((r) => (r.ok ? r.json() : null)),
     ])
       .then(([q, k, i, d]) => {
         setQuote(q);
@@ -44,6 +49,34 @@ export default function StockPage() {
     if (!klines.length) return [];
     return calcSMA(klines.map((k) => k.close), 20);
   }, [klines]);
+
+  const ma10Series = useMemo(() => {
+    if (!klines.length) return [];
+    return calcSMA(klines.map((k) => k.close), 10);
+  }, [klines]);
+
+  const ma60Series = useMemo(() => {
+    if (!klines.length) return [];
+    return calcSMA(klines.map((k) => k.close), 60);
+  }, [klines]);
+
+  useEffect(() => {
+    if (!token || !code) return;
+    getWatchlist(token).then((list) => setInWatchlist(list.some((w) => w.code === code)));
+  }, [token, code]);
+
+  const toggleWatchlist = async () => {
+    if (!token || !code || !quote) return;
+    setWatchBusy(true);
+    if (inWatchlist) {
+      await removeFromWatchlist(code, token);
+      setInWatchlist(false);
+    } else {
+      await addToWatchlist(code, quote.name, token);
+      setInWatchlist(true);
+    }
+    setWatchBusy(false);
+  };
 
   if (loading || !quote) {
     return (
@@ -68,6 +101,16 @@ export default function StockPage() {
             <div className="text-base font-bold">{quote.name}</div>
             <div className="text-xs text-text-tertiary font-mono">{quote.code}</div>
           </div>
+          <button
+            onClick={toggleWatchlist}
+            disabled={watchBusy}
+            className={`ml-auto flex h-9 w-9 items-center justify-center rounded-lg bg-bg-tertiary transition-colors hover:text-accent-gold disabled:opacity-50 ${
+              inWatchlist ? 'text-accent-gold' : 'text-text-tertiary'
+            }`}
+            title={inWatchlist ? '已加入自选' : '加入自选'}
+          >
+            <Star size={18} className={inWatchlist ? 'fill-accent-gold' : ''} />
+          </button>
         </div>
       </div>
 
@@ -157,7 +200,9 @@ export default function StockPage() {
             <KLineChart
               data={klines}
               ma5={ma5Series}
+              ma10={ma10Series}
               ma20={ma20Series}
+              ma60={ma60Series}
             />
             <div className="mt-2 flex items-center justify-center gap-4 text-[10px] text-text-tertiary">
               <span className="flex items-center gap-1"><span className="inline-block h-1 w-3 rounded bg-accent-gold" />MA5</span>

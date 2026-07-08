@@ -23,16 +23,20 @@ interface KLineData {
 interface KLineChartProps {
   data: KLineData[];
   ma5?: (number | null)[];
+  ma10?: (number | null)[];
   ma20?: (number | null)[];
+  ma60?: (number | null)[];
 }
 
-export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
+export default function KLineChart({ data, ma5, ma10, ma20, ma60 }: KLineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const ma5SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const ma10SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ma20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const ma60SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
 
   useEffect(() => {
     if (!containerRef.current || data.length === 0) return;
@@ -105,6 +109,16 @@ export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
       ma5SeriesRef.current = ma5Series;
     }
 
+    if (ma10) {
+      const ma10Series = chart.addSeries(LineSeries, {
+        color: '#22D3EE',
+        lineWidth: 1,
+        title: 'MA10',
+        lastValueVisible: false,
+      });
+      ma10SeriesRef.current = ma10Series;
+    }
+
     if (ma20) {
       const ma20Series = chart.addSeries(LineSeries, {
         color: '#3B82F6',
@@ -113,6 +127,16 @@ export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
         lastValueVisible: false,
       });
       ma20SeriesRef.current = ma20Series;
+    }
+
+    if (ma60) {
+      const ma60Series = chart.addSeries(LineSeries, {
+        color: '#A855F7',
+        lineWidth: 1,
+        title: 'MA60',
+        lastValueVisible: false,
+      });
+      ma60SeriesRef.current = ma60Series;
     }
 
     const resizeObserver = new ResizeObserver((entries) => {
@@ -130,7 +154,9 @@ export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
       ma5SeriesRef.current = null;
+      ma10SeriesRef.current = null;
       ma20SeriesRef.current = null;
+      ma60SeriesRef.current = null;
     };
   }, []);
 
@@ -178,8 +204,32 @@ export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
       ma20SeriesRef.current.setData(ma20Data);
     }
 
+    if (ma10SeriesRef.current && ma10) {
+      const ma10Data: LineData[] = data
+        .map((d, i) => {
+          const val = ma10[i];
+          return val != null
+            ? ({ time: d.date, value: val } as LineData)
+            : null;
+        })
+        .filter(Boolean) as LineData[];
+      ma10SeriesRef.current.setData(ma10Data);
+    }
+
+    if (ma60SeriesRef.current && ma60) {
+      const ma60Data: LineData[] = data
+        .map((d, i) => {
+          const val = ma60[i];
+          return val != null
+            ? ({ time: d.date, value: val } as LineData)
+            : null;
+        })
+        .filter(Boolean) as LineData[];
+      ma60SeriesRef.current.setData(ma60Data);
+    }
+
     chartRef.current?.timeScale().fitContent();
-  }, [data, ma5, ma20]);
+  }, [data, ma5, ma10, ma20, ma60]);
 
   return (
     <div

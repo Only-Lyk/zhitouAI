@@ -45,6 +45,64 @@ def _get_tencent_prefix(code: str) -> str:
     return "sz"
 
 
+def _to_float(v: Any) -> Optional[float]:
+    """通用安全浮点转换（东方财富返回可能带逗号或 '-'）"""
+    try:
+        if v is None:
+            return None
+        s = str(v).replace(",", "")
+        if s.strip() in ("", "-", "--", "None", "null"):
+            return None
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+
+# 全A股快照缓存（避免每次请求都打东方财富）
+_all_a_shares_cache: Dict[str, Any] = {"ts": 0.0, "data": []}
+
+
+@retry_on_error(max_retries=2, delay=1.0)
+def get_all_a_shares(use_cache: bool = True) -> List[Dict[str, Any]]:
+    """获取全部A股快照（东方财富接口），用于行情列表与AI全市场选股。"""
+    now = time.time()
+    if use_cache and now - _all_a_shares_cache["ts"] < 300 and _all_a_shares_cache["data"]:
+        return _all_a_shares_cache["data"]
+    try:
+        _sleep_random()
+        url = (
+            "https://push2.eastmoney.com/api/qt/clist/get"
+            "?pn=1&pz=6000&po=1&np=1&fltt=2&invt=2&fid=f3"
+            "&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+            "&fields=f12,f14,f2,f3,f20,f9,f8"
+        )
+        resp = requests.get(url, headers=TENCENT_HEADERS, timeout=15)
+        data = resp.json()
+        result: List[Dict[str, Any]] = []
+        if data.get("data") and isinstance(data["data"].get("diff"), list):
+            for item in data["data"]["diff"]:
+                code = item.get("f12")
+                name = item.get("f14")
+                if not code or not name:
+                    continue
+                mcap = _to_float(item.get("f20"))
+                result.append({
+                    "code": code,
+                    "name": name,
+                    "price": _to_float(item.get("f2")),
+                    "change_pct": _to_float(item.get("f3")),
+                    "pe": _to_float(item.get("f9")),
+                    "market_cap": (mcap / 1e8) if mcap else None,
+                    "turnover": _to_float(item.get("f8")),
+                })
+        _all_a_shares_cache["ts"] = time.time()
+        _all_a_shares_cache["data"] = result
+        return result
+    except Exception as e:
+        print(f"Error fetching all a shares: {e}")
+        return _all_a_shares_cache["data"] or []
+
+
 @retry_on_error(max_retries=3, delay=1.5)
 def get_market_indices() -> List[Dict[str, Any]]:
     """获取主要大盘指数"""

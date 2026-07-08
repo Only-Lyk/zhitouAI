@@ -6,13 +6,14 @@ from .models import (
     MarketIndex, StockBasic, AIDiagnosisResult, AIRecommendation, ChatRequest,
     UserRegister, UserLogin, UserResponse, CreditInfo, TransactionRecord,
     AdminSetting, AdminSettingsUpdate, AdminUserList, AdminTransactionList,
+    WatchlistAdd,
 )
 from .auth import (
     get_current_user, get_current_admin, verify_password,
     create_access_token, get_password_hash,
 )
 from .db import get_db
-from . import credit_service, admin_service
+from . import db, credit_service, admin_service
 import json
 import traceback
 
@@ -135,6 +136,25 @@ async def get_my_transactions(
     return {"transactions": transactions, "total": total, "page": page, "page_size": page_size}
 
 
+# ========== Watchlist ==========
+
+@router.get("/api/watchlist")
+async def api_get_watchlist(current_user: dict = Depends(get_current_user)):
+    return db.get_watchlist(current_user["id"])
+
+
+@router.post("/api/watchlist")
+async def api_add_watchlist(req: WatchlistAdd, current_user: dict = Depends(get_current_user)):
+    db.add_watchlist(current_user["id"], req.code, req.name)
+    return {"success": True}
+
+
+@router.delete("/api/watchlist/{code}")
+async def api_del_watchlist(code: str, current_user: dict = Depends(get_current_user)):
+    db.remove_watchlist(current_user["id"], code)
+    return {"success": True}
+
+
 # ========== Market ==========
 
 @router.get("/api/market/indices", response_model=List[MarketIndex])
@@ -161,6 +181,12 @@ async def stock_indicators(code: str = Query(...), period: str = Query("daily"))
 @router.get("/api/stock/search")
 async def search_stocks(keyword: str = Query(..., min_length=1)):
     return data_service.search_stocks(keyword)
+
+
+@router.get("/api/stock/list")
+async def stock_list():
+    """全部A股快照（东方财富），用于行情列表页，无需登录。"""
+    return data_service.get_all_a_shares()
 
 
 @router.get("/api/market/sectors")
@@ -278,6 +304,47 @@ async def ai_recommendations(
             if not ok:
                 raise HTTPException(status_code=402, detail="积分余额不足，请充值后再试。")
     return await ai_service.get_daily_recommendations()
+
+
+@router.get("/api/ai/recommendations/yesterday")
+async def rec_yesterday(current_user: dict = Depends(get_current_user)):
+    """返回上一交易日推荐，并对比今日表现（持有收益）。"""
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    ydate = db.get_latest_recommendation_date(today)
+    if not ydate:
+        return {"date": None, "items": []}
+    rows = db.get_recommendation_history(ydate)
+    items = []
+    for r in rows:
+        code = r["code"]
+        name = r["name"]
+        day_price = r["price"]
+        day_change = r["change_pct"]
+        today_price = None
+        today_change = None
+        try:
+            q = data_service.get_stock_quote(code)
+            today_price = q.get("price")
+            today_change = q.get("change_pct")
+        except Exception:
+            pass
+        hold = None
+        if day_price and today_price:
+            hold = round((today_price - day_price) / day_price * 100, 2)
+        items.append({
+            "code": code,
+            "name": name,
+            "day_price": day_price,
+            "day_change_pct": day_change,
+            "today_price": today_price,
+            "today_change_pct": today_change,
+            "hold_return": hold,
+            "signal": r["signal"],
+            "score": r["score"],
+        })
+    items.sort(key=lambda x: (x["hold_return"] if x["hold_return"] is not None else -999), reverse=True)
+    return {"date": ydate, "items": items}
 
 
 @router.post("/api/ai/chat")

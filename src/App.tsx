@@ -7,6 +7,7 @@ import StockPage from './pages/StockPage';
 import AIPage from './pages/AIPage';
 import ChatPage from './pages/ChatPage';
 import WatchlistPage from './pages/WatchlistPage';
+import StockListPage from './pages/StockListPage';
 import LoginPage from './pages/LoginPage';
 import AdminPage from './pages/AdminPage';
 import SettingsPage from './pages/SettingsPage';
@@ -28,6 +29,7 @@ function AppRoutes() {
     <Layout>
       <Routes>
         <Route path="/" element={<HomePage />} />
+        <Route path="/stocks" element={<StockListPage />} />
         <Route path="/stock/:code" element={<StockPage />} />
         <Route path="/ai" element={<AIPage />} />
         <Route path="/chat" element={<ChatPage />} />
