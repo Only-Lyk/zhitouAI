@@ -395,7 +395,8 @@ async def diagnose_stock_stream(code: str, model_config: Dict[str, Any] = None) 
         model_config = next((m for m in models if m.get("default")), models[0] if models else None)
 
     if not model_config or not model_config.get("api_key"):
-        yield from _stream_rule_based(code)
+        async for chunk in _stream_rule_based(code):
+            yield chunk
         return
 
     quote = get_stock_quote(code)
@@ -427,7 +428,8 @@ RSI(14)：{indicators.get('rsi14', 'N/A')}
         yield chunk
     # 若 LLM 未返回有效内容，回退到本地规则诊断，避免空输出
     if not buffer.strip():
-        yield from _stream_rule_based(code)
+        async for chunk in _stream_rule_based(code):
+            yield chunk
 
 
 
