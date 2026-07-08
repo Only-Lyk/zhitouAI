@@ -1,7 +1,5 @@
-# 智投AI - Windows Server One-Click Deploy Script
-# Usage: Run as Administrator in PowerShell: .\deploy.ps1
-
-$ErrorActionPreference = "Stop"
+# ZhiTou AI - Windows Server One-Click Deploy Script
+# Usage: .\deploy.ps1
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  ZhiTou AI Deploy Script" -ForegroundColor Cyan
@@ -9,8 +7,8 @@ Write-Host "========================================" -ForegroundColor Cyan
 
 # 1. Stop old service
 Write-Host "`n[1/6] Stopping old service..." -ForegroundColor Yellow
-taskkill /F /IM python.exe 2>$null
-Start-Sleep -Seconds 2
+$proc = Get-Process python -ErrorAction SilentlyContinue
+if ($proc) { Stop-Process -Name python -Force; Start-Sleep -Seconds 2 }
 
 # 2. Install frontend dependencies
 Write-Host "`n[2/6] Installing frontend deps..." -ForegroundColor Yellow
