@@ -70,10 +70,32 @@ INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('llm_models_config', '
 """
 
 
+def _migrate_db():
+    """对已有数据库进行列级迁移（SQLite 不支持 IF NOT EXISTS 加列）"""
+    with get_db() as db:
+        # users.default_model
+        try:
+            db.execute("ALTER TABLE users ADD COLUMN default_model TEXT")
+        except sqlite3.OperationalError:
+            pass
+        # transactions 新增 token 相关列
+        for col, ddl in [
+            ("tokens_used", "INTEGER DEFAULT 0"),
+            ("model_id", "TEXT"),
+            ("price_per_1k", "REAL"),
+        ]:
+            try:
+                db.execute(f"ALTER TABLE transactions ADD COLUMN {col} {ddl}")
+            except sqlite3.OperationalError:
+                pass
+        db.commit()
+
+
 def init_db():
     with get_db() as db:
         db.executescript(INIT_SQL)
         db.commit()
+    _migrate_db()
 
 
 @contextmanager
