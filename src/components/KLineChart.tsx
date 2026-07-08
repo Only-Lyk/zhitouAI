@@ -1,15 +1,15 @@
-import { useMemo } from 'react';
+import { useEffect, useRef } from 'react';
 import {
-  ComposedChart,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Bar,
-  Line,
-  ResponsiveContainer,
-  CartesianGrid,
-  ReferenceLine,
-} from 'recharts';
+  createChart,
+  type IChartApi,
+  type ISeriesApi,
+  CandlestickSeries,
+  HistogramSeries,
+  LineSeries,
+  type CandlestickData,
+  type HistogramData,
+  type LineData,
+} from 'lightweight-charts';
 
 interface KLineData {
   date: string;
@@ -27,105 +27,169 @@ interface KLineChartProps {
 }
 
 export default function KLineChart({ data, ma5, ma20 }: KLineChartProps) {
-  const chartData = useMemo(() => {
-    return data.map((d, i) => ({
-      ...d,
-      ma5: ma5?.[i] ?? null,
-      ma20: ma20?.[i] ?? null,
-      color: d.close >= d.open ? '#10B981' : '#EF4444',
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const ma5SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const ma20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || data.length === 0) return;
+
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { color: 'transparent' },
+        textColor: '#9CA3AF',
+        fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+      },
+      grid: {
+        vertLines: { color: 'rgba(255,255,255,0.04)' },
+        horzLines: { color: 'rgba(255,255,255,0.04)' },
+      },
+      crosshair: {
+        mode: 1,
+        vertLine: {
+          color: 'rgba(212,168,83,0.5)',
+          width: 1,
+          style: 2,
+          labelBackgroundColor: '#D4A853',
+        },
+        horzLine: {
+          color: 'rgba(212,168,83,0.5)',
+          width: 1,
+          style: 2,
+          labelBackgroundColor: '#D4A853',
+        },
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(255,255,255,0.06)',
+        scaleMargins: { top: 0.1, bottom: 0.2 },
+      },
+      timeScale: {
+        borderColor: 'rgba(255,255,255,0.06)',
+        timeVisible: false,
+      },
+      handleScroll: { vertTouchDrag: false },
+      handleScale: { axisPressedMouseMove: { time: true, price: false } },
+    });
+    chartRef.current = chart;
+
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#10B981',
+      downColor: '#EF4444',
+      borderUpColor: '#10B981',
+      borderDownColor: '#EF4444',
+      wickUpColor: '#10B981',
+      wickDownColor: '#EF4444',
+    });
+    candleSeriesRef.current = candleSeries;
+
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      color: '#10B981',
+      priceFormat: { type: 'volume' },
+      priceScaleId: '',
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0.85, bottom: 0 },
+    });
+    volumeSeriesRef.current = volumeSeries;
+
+    if (ma5) {
+      const ma5Series = chart.addSeries(LineSeries, {
+        color: '#D4A853',
+        lineWidth: 1.5,
+        title: 'MA5',
+        lastValueVisible: false,
+      });
+      ma5SeriesRef.current = ma5Series;
+    }
+
+    if (ma20) {
+      const ma20Series = chart.addSeries(LineSeries, {
+        color: '#3B82F6',
+        lineWidth: 1.5,
+        title: 'MA20',
+        lastValueVisible: false,
+      });
+      ma20SeriesRef.current = ma20Series;
+    }
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        chart.applyOptions({ width, height });
+      }
+    });
+    resizeObserver.observe(containerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      ma5SeriesRef.current = null;
+      ma20SeriesRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!data.length || !candleSeriesRef.current || !volumeSeriesRef.current) return;
+
+    const candleData: CandlestickData[] = data.map((d) => ({
+      time: d.date as unknown as number,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
     }));
+
+    const volumeData: HistogramData[] = data.map((d) => ({
+      time: d.date as unknown as number,
+      value: d.volume,
+      color: d.close >= d.open ? 'rgba(16,185,129,0.5)' : 'rgba(239,68,68,0.5)',
+    }));
+
+    candleSeriesRef.current.setData(candleData);
+    volumeSeriesRef.current.setData(volumeData);
+
+    if (ma5SeriesRef.current && ma5) {
+      const ma5Data: LineData[] = data
+        .map((d, i) => {
+          const val = ma5[i];
+          return val != null
+            ? ({ time: d.date as unknown as number, value: val } as LineData)
+            : null;
+        })
+        .filter(Boolean) as LineData[];
+      ma5SeriesRef.current.setData(ma5Data);
+    }
+
+    if (ma20SeriesRef.current && ma20) {
+      const ma20Data: LineData[] = data
+        .map((d, i) => {
+          const val = ma20[i];
+          return val != null
+            ? ({ time: d.date as unknown as number, value: val } as LineData)
+            : null;
+        })
+        .filter(Boolean) as LineData[];
+      ma20SeriesRef.current.setData(ma20Data);
+    }
+
+    chartRef.current?.timeScale().fitContent();
   }, [data, ma5, ma20]);
 
-  const latest = data[data.length - 1];
-  if (!latest) return null;
-
-  const yDomain = [
-    Math.min(...data.map((d) => d.low)) * 0.98,
-    Math.max(...data.map((d) => d.high)) * 1.02,
-  ];
-
   return (
-    <div className="h-72 w-full sm:h-96">
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-          <XAxis
-            dataKey="date"
-            tick={{ fill: '#6B7280', fontSize: 10 }}
-            tickLine={false}
-            axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
-            tickFormatter={(v: string) => v.slice(5)}
-            minTickGap={30}
-          />
-          <YAxis
-            domain={yDomain}
-            tick={{ fill: '#6B7280', fontSize: 10 }}
-            tickLine={false}
-            axisLine={false}
-            width={50}
-            tickFormatter={(v: number) => v.toFixed(1)}
-          />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: '#1F2937',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 8,
-              fontSize: 12,
-            }}
-            labelStyle={{ color: '#9CA3AF' }}
-            itemStyle={{ color: '#F3F4F6' }}
-            formatter={(value: any, name: any) => {
-              if (name === 'volume') return [value?.toFixed?.(0) ?? value, '成交量'];
-              return [typeof value === 'number' ? value.toFixed(2) : value, name];
-            }}
-          />
-          <Bar
-            dataKey="close"
-            fill="#8884d8"
-            barSize={chartData.length > 60 ? 2 : 4}
-            shape={(props: any) => {
-              const { x, y, width, height, payload } = props;
-              const isUp = payload.close >= payload.open;
-              const color = isUp ? '#10B981' : '#EF4444';
-              const bodyTop = Math.min(y, y + height);
-              const bodyHeight = Math.abs(height) || 1;
-              return (
-                <g>
-                  <line
-                    x1={x + width / 2}
-                    y1={bodyTop + bodyHeight}
-                    x2={x + width / 2}
-                    y2={bodyTop + bodyHeight + (isUp ? -2 : 2)}
-                    stroke={color}
-                    strokeWidth={1}
-                  />
-                  <rect x={x} y={bodyTop} width={width} height={bodyHeight} fill={color} rx={1} />
-                </g>
-              );
-            }}
-          />
-          {ma5 && (
-            <Line
-              type="monotone"
-              dataKey="ma5"
-              stroke="#D4A853"
-              strokeWidth={1.5}
-              dot={false}
-              connectNulls
-            />
-          )}
-          {ma20 && (
-            <Line
-              type="monotone"
-              dataKey="ma20"
-              stroke="#60A5FA"
-              strokeWidth={1.5}
-              dot={false}
-              connectNulls
-            />
-          )}
-        </ComposedChart>
-      </ResponsiveContainer>
-    </div>
+    <div
+      ref={containerRef}
+      style={{
+        width: '100%',
+        height: '340px',
+        borderRadius: '8px',
+        overflow: 'hidden',
+      }}
+    />
   );
 }
