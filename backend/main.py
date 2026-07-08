@@ -19,14 +19,11 @@ app.add_middleware(
 
 app.include_router(router)
 
-# 生产环境挂载前端静态文件
 static_dir = os.path.join(os.path.dirname(__file__), "..", "dist")
 if os.path.exists(static_dir):
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
-
 def _ensure_admin_exists():
-    """确保默认管理员账户存在"""
     db_path = os.path.join(os.path.dirname(__file__), "..", "data", "zhitouai.db")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path)
@@ -43,7 +40,6 @@ def _ensure_admin_exists():
         )
         conn.commit()
     conn.close()
-
 
 @app.on_event("startup")
 async def startup_event():
