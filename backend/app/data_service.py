@@ -3,6 +3,7 @@ import time
 import random
 import requests
 import json
+import os
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import functools
@@ -39,9 +40,14 @@ def _sleep_random(min_sec: float = 0.3, max_sec: float = 1.0):
 
 
 def _get_tencent_prefix(code: str) -> str:
-    """获取腾讯接口前缀"""
-    if code.startswith("6") or code.startswith("5") or code.startswith("9"):
+    """获取腾讯接口前缀（沪 sh / 深 sz / 北交所 bj）"""
+    if code.startswith(("6", "5")):
         return "sh"
+    if code.startswith(("8", "4")):
+        return "bj"
+    if code.startswith("9"):
+        # 92xxxx 为北交所，其余 9xxxxx 多为沪市
+        return "bj" if code.startswith("92") else "sh"
     return "sz"
 
 
@@ -58,42 +64,114 @@ def _to_float(v: Any) -> Optional[float]:
         return None
 
 
-# 全A股快照缓存（避免每次请求都打东方财富）
+# 全A股快照缓存（避免每次请求都打腾讯接口）
 _all_a_shares_cache: Dict[str, Any] = {"ts": 0.0, "data": []}
+_a_shares_list_cache: Optional[List[Dict[str, str]]] = None
+
+_A_SHARES_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "a_shares.json")
+
+
+def _load_a_shares_list() -> List[Dict[str, str]]:
+    """加载随仓库发布的全量A股代码列表（开发机一次性生成，东方财富分页抓取）"""
+    global _a_shares_list_cache
+    if _a_shares_list_cache is not None:
+        return _a_shares_list_cache
+    try:
+        with open(_A_SHARES_FILE, "r", encoding="utf-8-sig") as f:
+            _a_shares_list_cache = json.load(f)
+    except Exception as e:
+        print(f"Load a_shares.json failed: {e}")
+        _a_shares_list_cache = []
+    return _a_shares_list_cache
+
+
+def _parse_tencent_quote_fields(data: List[str]) -> Dict[str, Any]:
+    """从腾讯行情快照字段中提取行情（字段索引同 _fetch_quote_from_tencent）"""
+    def gf(idx: int) -> Optional[float]:
+        val = data[idx] if idx < len(data) else None
+        if val and val != "":
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    price = gf(3) or 0.0
+    prev_close = gf(4) or price
+    change = price - prev_close
+    change_pct = (change / prev_close * 100) if prev_close > 0 else 0.0
+    return {
+        "price": round(price, 2),
+        "change": round(change, 2),
+        "change_pct": round(change_pct, 2),
+        "volume": gf(6) or 0.0,
+        "turnover": gf(38),
+        "pe": gf(39),
+        "market_cap": gf(44),
+        "pb": gf(46),
+    }
+
+
+def _fetch_quotes_from_tencent(codes: List[str]) -> Dict[str, Dict[str, Any]]:
+    """批量从腾讯接口拉取实时行情（每批最多 100 只，兼容服务器网络）"""
+    out: Dict[str, Dict[str, Any]] = {}
+    prefixed = [(c, _get_tencent_prefix(c) + c) for c in codes]
+    batch_size = 100
+    for i in range(0, len(prefixed), batch_size):
+        chunk = prefixed[i:i + batch_size]
+        url = "https://qt.gtimg.cn/q=" + ",".join(p[1] for p in chunk)
+        try:
+            resp = requests.get(url, headers=TENCENT_HEADERS, timeout=15)
+            resp.encoding = "gbk"
+            for line in resp.text.split(";"):
+                line = line.strip()
+                if not line.startswith("v_"):
+                    continue
+                eq = line.find("=")
+                if eq < 0:
+                    continue
+                raw = line[2:eq]
+                q = line.find('"')
+                if q < 0:
+                    continue
+                data = line[q + 1:].split("~")
+                if len(data) < 47:
+                    continue
+                base = raw[2:] if raw[:2] in ("sh", "sz", "bj") else raw
+                parsed = _parse_tencent_quote_fields(data)
+                parsed["name"] = data[1] if len(data) > 1 else ""
+                out[base] = parsed
+        except Exception as e:
+            print(f"Tencent batch quote error: {e}")
+        time.sleep(0.05)
+    return out
 
 
 @retry_on_error(max_retries=2, delay=1.0)
 def get_all_a_shares(use_cache: bool = True) -> List[Dict[str, Any]]:
-    """获取全部A股快照（东方财富接口），用于行情列表与AI全市场选股。"""
+    """获取全部A股快照（静态代码列表 + 腾讯实时行情，去除东方财富依赖）。"""
     now = time.time()
     if use_cache and now - _all_a_shares_cache["ts"] < 300 and _all_a_shares_cache["data"]:
         return _all_a_shares_cache["data"]
+    result: List[Dict[str, Any]] = []
     try:
-        _sleep_random()
-        url = (
-            "https://push2.eastmoney.com/api/qt/clist/get"
-            "?pn=1&pz=6000&po=1&np=1&fltt=2&invt=2&fid=f3"
-            "&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
-            "&fields=f12,f14,f2,f3,f20,f9,f8"
-        )
-        resp = requests.get(url, headers=TENCENT_HEADERS, timeout=15)
-        data = resp.json()
-        result: List[Dict[str, Any]] = []
-        if data.get("data") and isinstance(data["data"].get("diff"), list):
-            for item in data["data"]["diff"]:
-                code = item.get("f12")
-                name = item.get("f14")
-                if not code or not name:
+        codes = _load_a_shares_list()
+        if codes:
+            name_map = {c["code"]: c.get("name", "") for c in codes}
+            quotes = _fetch_quotes_from_tencent([c["code"] for c in codes])
+            for c in codes:
+                code = c["code"]
+                q = quotes.get(code)
+                if not q:
                     continue
-                mcap = _to_float(item.get("f20"))
                 result.append({
                     "code": code,
-                    "name": name,
-                    "price": _to_float(item.get("f2")),
-                    "change_pct": _to_float(item.get("f3")),
-                    "pe": _to_float(item.get("f9")),
-                    "market_cap": (mcap / 1e8) if mcap else None,
-                    "turnover": _to_float(item.get("f8")),
+                    "name": name_map.get(code) or q.get("name") or f"股票{code}",
+                    "price": q["price"],
+                    "change_pct": q["change_pct"],
+                    "pe": q["pe"],
+                    "market_cap": q["market_cap"],
+                    "turnover": q["turnover"],
                 })
         _all_a_shares_cache["ts"] = time.time()
         _all_a_shares_cache["data"] = result
