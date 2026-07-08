@@ -8,7 +8,7 @@ from .models import (
     AdminSetting, AdminSettingsUpdate, AdminUserList, AdminTransactionList,
 )
 from .auth import (
-    get_current_user, get_current_admin, hash_password, verify_password,
+    get_current_user, get_current_admin, verify_password,
     create_access_token, get_password_hash,
 )
 from .db import get_db
