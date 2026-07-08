@@ -53,7 +53,8 @@ async def register(req: UserRegister):
 async def login(req: UserLogin):
     with get_db() as db:
         cursor = db.execute("SELECT * FROM users WHERE username = ?", (req.username,))
-        user = cursor.fetchone()
+        row = cursor.fetchone()
+        user = dict(row) if row else None
         if not user or not verify_password(req.password, user["password_hash"]):
             raise HTTPException(status_code=401, detail="用户名或密码错误")
 
