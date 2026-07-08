@@ -27,7 +27,7 @@ if os.path.exists(static_dir):
 
 def _ensure_admin_exists():
     """确保默认管理员账户存在"""
-    db_path = os.path.join(os.path.dirname(__file__), "..", "data", "app.db")
+    db_path = os.path.join(os.path.dirname(__file__), "..", "data", "zhitouai.db")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
