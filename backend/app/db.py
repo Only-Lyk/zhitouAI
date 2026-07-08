@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS watchlist (
 
 -- 初始化管理员账户（默认密码 admin123，首次登录后请修改）
 INSERT OR IGNORE INTO users (id, username, email, password_hash, is_admin)
-VALUES (1, 'admin', 'admin@zhitou.ai', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYA.qGZvKG6', 1);
+VALUES (1, 'admin', 'admin@zhitou.ai', '$2b$12$Hn9W81KKRF6PBeLGSxcPYuQxAYgbsSeU.wqcdp6rWnPZFZ3eNSewK', 1);
 
 -- 给管理员初始积分
 INSERT OR IGNORE INTO credits (user_id, balance, total_recharged)
