@@ -357,7 +357,12 @@ def _fetch_kline_from_tencent(code: str, period: str = "day", days: int = 120) -
         return []
 
 
-PERIOD_MAP = {"daily": "day", "weekly": "week", "monthly": "month"}
+# 前端传 day/week/month，后端路由默认 daily；二者都支持
+PERIOD_MAP = {
+    "day": "day", "daily": "day",
+    "week": "week", "weekly": "week",
+    "month": "month", "monthly": "month",
+}
 
 
 @retry_on_error(max_retries=2, delay=1.0)

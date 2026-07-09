@@ -12,7 +12,7 @@ interface Message {
 export default function ChatPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { token } = useAuth();
+  const { token, loading: authLoading } = useAuth();
   const stockCode = searchParams.get('stock');
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -26,6 +26,7 @@ export default function ChatPage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const autoSentRef = useRef(false);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -33,13 +34,12 @@ export default function ChatPage() {
     }
   }, [messages]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
+  const sendMessage = async (text: string) => {
+    const content = text.trim();
+    if (!content || loading) return;
 
-    const userMsg: Message = { role: 'user', content: input.trim(), id: Date.now().toString() };
+    const userMsg: Message = { role: 'user', content, id: Date.now().toString() };
     setMessages((prev) => [...prev, userMsg]);
-    setInput('');
     setLoading(true);
 
     const assistantId = (Date.now() + 1).toString();
@@ -57,7 +57,7 @@ export default function ChatPage() {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message: userMsg.content, history: [] }),
+        body: JSON.stringify({ message: content, history: [] }),
       });
 
       const reader = res.body?.getReader();
@@ -106,6 +106,44 @@ export default function ChatPage() {
     }
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || loading) return;
+    const text = input;
+    setInput('');
+    sendMessage(text);
+  };
+
+  // 从个股详情「深度咨询」跳转而来：自动发送股票信息 + 深度分析提示词
+  useEffect(() => {
+    if (!stockCode || autoSentRef.current) return;
+    if (authLoading) return; // 等待登录态解析
+    autoSentRef.current = true;
+    if (!token) {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: '请先登录后再使用AI助手进行深度咨询。', id: 'need-login' },
+      ]);
+      return;
+    }
+    (async () => {
+      let name = '';
+      try {
+        const res = await fetch(`/api/stock/quote?code=${stockCode}`);
+        if (res.ok) {
+          const q = await res.json();
+          name = q?.name ? `${q.name}` : '';
+        }
+      } catch {
+        // ignore
+      }
+      const title = name ? `${name}(${stockCode})` : stockCode;
+      const prompt = `请对股票 ${title} 做深度分析，请按以下维度展开，结论清晰、可操作：\n1) 基本面：业绩、行业地位、成长性\n2) 技术面：近期K线形态、均线系统、MACD/RSI 信号\n3) 估值：PE/PB/总市值是否合理，与行业对比\n4) 主要风险点\n5) 操作建议：关键点位（支撑/压力）、仓位与节奏建议`;
+      sendMessage(prompt);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stockCode, token, authLoading]);
+
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
@@ -125,7 +163,7 @@ export default function ChatPage() {
             }`}>
               {msg.role === 'assistant' ? <Bot size={14} /> : <User size={14} />}
             </div>
-            <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
+            <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
               msg.role === 'assistant'
                 ? 'bg-bg-secondary border border-border-default text-text-secondary'
                 : 'bg-accent-gold/15 text-text-primary'

@@ -174,6 +174,14 @@ export default function AIPage() {
           Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="glass-card h-32 animate-pulse" />
           ))
+        ) : recommendations.length === 0 ? (
+          <div className="glass-card flex flex-col items-center justify-center gap-2 py-12 text-center">
+            <Sparkles size={28} className="text-text-tertiary opacity-40" />
+            <p className="text-sm text-text-secondary">暂无可推荐的标的</p>
+            <p className="text-xs text-text-tertiary">
+              请确认已登录且积分充足，或稍后点击右上角刷新重新扫描全市场
+            </p>
+          </div>
         ) : (
           recommendations.map((rec, index) => (
             <div key={rec.code} className="relative">
