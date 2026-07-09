@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, TrendingUp, TrendingDown, Activity, BarChart3, Brain, Star } from 'lucide-react';
 import { calcSMA } from '../utils/indicators';
 import KLineChart from '../components/KLineChart';
+import LoadingSpinner from '../components/LoadingSpinner';
 import AIScoreBadge from '../components/AIScoreBadge';
 import { useAuth } from '../context/AuthContext';
 import { addToWatchlist, removeFromWatchlist, getWatchlist } from '../utils/watchlist';
@@ -197,13 +198,17 @@ export default function StockPage() {
                 </button>
               ))}
             </div>
-            <KLineChart
-              data={klines}
-              ma5={ma5Series}
-              ma10={ma10Series}
-              ma20={ma20Series}
-              ma60={ma60Series}
-            />
+            {klines.length === 0 ? (
+              <LoadingSpinner text="正在加载K线数据…" />
+            ) : (
+              <KLineChart
+                data={klines}
+                ma5={ma5Series}
+                ma10={ma10Series}
+                ma20={ma20Series}
+                ma60={ma60Series}
+              />
+            )}
             <div className="mt-2 flex items-center justify-center gap-4 text-[10px] text-text-tertiary">
               <span className="flex items-center gap-1"><span className="inline-block h-1 w-3 rounded bg-accent-gold" />MA5</span>
               <span className="flex items-center gap-1"><span className="inline-block h-1 w-3 rounded bg-blue-400" />MA20</span>
@@ -212,64 +217,72 @@ export default function StockPage() {
         )}
 
         {activeTab === 'indicators' && (
-          <div className="space-y-3">
-            <IndicatorCard title="均线系统" items={[
-              { label: 'MA5', value: indicators.ma5 },
-              { label: 'MA10', value: indicators.ma10 },
-              { label: 'MA20', value: indicators.ma20 },
-              { label: 'MA60', value: indicators.ma60 },
-            ]} />
-            <IndicatorCard title="MACD" items={[
-              { label: 'DIF', value: indicators.macd_dif },
-              { label: 'DEA', value: indicators.macd_dea },
-              { label: '柱状', value: indicators.macd_hist, color: (indicators.macd_hist ?? 0) >= 0 ? 'text-up' : 'text-down' },
-            ]} />
-            <IndicatorCard title="RSI & 布林带" items={[
-              { label: 'RSI(14)', value: indicators.rsi14 },
-              { label: 'BOLL上轨', value: indicators.boll_up },
-              { label: 'BOLL中轨', value: indicators.boll_mid },
-              { label: 'BOLL下轨', value: indicators.boll_down },
-            ]} />
-          </div>
+          indicators && indicators.ma5 != null ? (
+            <div className="space-y-3">
+              <IndicatorCard title="均线系统" items={[
+                { label: 'MA5', value: indicators.ma5 },
+                { label: 'MA10', value: indicators.ma10 },
+                { label: 'MA20', value: indicators.ma20 },
+                { label: 'MA60', value: indicators.ma60 },
+              ]} />
+              <IndicatorCard title="MACD" items={[
+                { label: 'DIF', value: indicators.macd_dif },
+                { label: 'DEA', value: indicators.macd_dea },
+                { label: '柱状', value: indicators.macd_hist, color: (indicators.macd_hist ?? 0) >= 0 ? 'text-up' : 'text-down' },
+              ]} />
+              <IndicatorCard title="RSI & 布林带" items={[
+                { label: 'RSI(14)', value: indicators.rsi14 },
+                { label: 'BOLL上轨', value: indicators.boll_up },
+                { label: 'BOLL中轨', value: indicators.boll_mid },
+                { label: 'BOLL下轨', value: indicators.boll_down },
+              ]} />
+            </div>
+          ) : (
+            <LoadingSpinner text="正在加载技术指标…" />
+          )
         )}
 
-        {activeTab === 'ai' && diagnosis && (
-          <div className="space-y-3">
-            <div className="glass-card p-4">
-              <div className="flex items-center justify-between">
-                <AIScoreBadge score={diagnosis.score} size="lg" />
-                <span className={`text-xs font-medium px-2 py-0.5 rounded ${
-                  diagnosis.risk_level === '低' ? 'bg-up-bg text-up' :
-                  diagnosis.risk_level === '高' ? 'bg-down-bg text-down' : 'bg-bg-tertiary text-text-secondary'
-                }`}>
-                  风险:{diagnosis.risk_level}
-                </span>
+        {activeTab === 'ai' && (
+          diagnosis ? (
+            <div className="space-y-3">
+              <div className="glass-card p-4">
+                <div className="flex items-center justify-between">
+                  <AIScoreBadge score={diagnosis.score} size="lg" />
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                    diagnosis.risk_level === '低' ? 'bg-up-bg text-up' :
+                    diagnosis.risk_level === '高' ? 'bg-down-bg text-down' : 'bg-bg-tertiary text-text-secondary'
+                  }`}>
+                    风险:{diagnosis.risk_level}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                  <div><span className="text-text-tertiary">信号：</span><span className="font-medium">{diagnosis.signal}</span></div>
+                  <div><span className="text-text-tertiary">趋势：</span><span className="font-medium">{diagnosis.trend}</span></div>
+                  <div><span className="text-text-tertiary">支撑：</span><span className="font-mono">{diagnosis.support?.toFixed(2)}</span></div>
+                  <div><span className="text-text-tertiary">压力：</span><span className="font-mono">{diagnosis.pressure?.toFixed(2)}</span></div>
+                </div>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-text-tertiary">信号：</span><span className="font-medium">{diagnosis.signal}</span></div>
-                <div><span className="text-text-tertiary">趋势：</span><span className="font-medium">{diagnosis.trend}</span></div>
-                <div><span className="text-text-tertiary">支撑：</span><span className="font-mono">{diagnosis.support?.toFixed(2)}</span></div>
-                <div><span className="text-text-tertiary">压力：</span><span className="font-mono">{diagnosis.pressure?.toFixed(2)}</span></div>
+
+              <div className="glass-card p-4">
+                <h3 className="text-sm font-semibold text-accent-gold">技术解读</h3>
+                <p className="mt-2 text-sm leading-relaxed text-text-secondary">{diagnosis.reason}</p>
               </div>
-            </div>
 
-            <div className="glass-card p-4">
-              <h3 className="text-sm font-semibold text-accent-gold">技术解读</h3>
-              <p className="mt-2 text-sm leading-relaxed text-text-secondary">{diagnosis.reason}</p>
-            </div>
+              <div className="glass-card p-4">
+                <h3 className="text-sm font-semibold text-accent-gold">操作建议</h3>
+                <p className="mt-2 text-sm leading-relaxed text-text-secondary">{diagnosis.suggestion}</p>
+              </div>
 
-            <div className="glass-card p-4">
-              <h3 className="text-sm font-semibold text-accent-gold">操作建议</h3>
-              <p className="mt-2 text-sm leading-relaxed text-text-secondary">{diagnosis.suggestion}</p>
+              <button
+                onClick={() => navigate(`/chat?stock=${code}`)}
+                className="w-full rounded-xl bg-gradient-to-r from-accent-gold/20 to-accent-gold/5 border border-accent-gold/30 py-3 text-sm font-semibold text-accent-gold transition-all hover:bg-accent-gold/10"
+              >
+                向AI助手深度咨询此股
+              </button>
             </div>
-
-            <button
-              onClick={() => navigate(`/chat?stock=${code}`)}
-              className="w-full rounded-xl bg-gradient-to-r from-accent-gold/20 to-accent-gold/5 border border-accent-gold/30 py-3 text-sm font-semibold text-accent-gold transition-all hover:bg-accent-gold/10"
-            >
-              向AI助手深度咨询此股
-            </button>
-          </div>
+          ) : (
+            <LoadingSpinner text="正在生成AI诊断…" />
+          )
         )}
       </div>
     </div>

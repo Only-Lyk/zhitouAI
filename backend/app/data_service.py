@@ -7,6 +7,8 @@ import os
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import functools
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from . import db
 
 
 TENCENT_HEADERS = {
@@ -149,36 +151,81 @@ def _fetch_quotes_from_tencent(codes: List[str]) -> Dict[str, Dict[str, Any]]:
 
 @retry_on_error(max_retries=2, delay=1.0)
 def get_all_a_shares(use_cache: bool = True) -> List[Dict[str, Any]]:
-    """获取全部A股快照（静态代码列表 + 腾讯实时行情，去除东方财富依赖）。"""
+    """获取全部A股快照。优先读 SQLite 行情快照（毫秒级），无快照时同步拉一次。"""
     now = time.time()
-    if use_cache and now - _all_a_shares_cache["ts"] < 300 and _all_a_shares_cache["data"]:
+    if use_cache and now - _all_a_shares_cache["ts"] < 120 and _all_a_shares_cache["data"]:
         return _all_a_shares_cache["data"]
-    result: List[Dict[str, Any]] = []
+    # 1) 优先读 SQLite 快照
+    try:
+        snap = db.get_quote_snapshot()
+        if snap:
+            _all_a_shares_cache["ts"] = time.time()
+            _all_a_shares_cache["data"] = snap
+            return snap
+    except Exception as e:
+        print(f"read quote snapshot failed: {e}")
+    # 2) 快照为空：同步拉全量并写库（首次或异常兜底）
+    try:
+        refresh_quote_snapshot()
+        snap = db.get_quote_snapshot()
+        if snap:
+            _all_a_shares_cache["ts"] = time.time()
+            _all_a_shares_cache["data"] = snap
+            return snap
+    except Exception as e:
+        print(f"refresh quote snapshot failed: {e}")
+    return _all_a_shares_cache["data"] or []
+
+
+def _fetch_quotes_concurrent(codes: List[str], workers: int = 8) -> Dict[str, Dict[str, Any]]:
+    """并发批量拉取腾讯行情，缩短全市场扫描耗时（5500 只约几秒）。"""
+    out: Dict[str, Dict[str, Any]] = {}
+    batches = [codes[i:i + 100] for i in range(0, len(codes), 100)]
+
+    def worker(batch: List[str]) -> Dict[str, Dict[str, Any]]:
+        return _fetch_quotes_from_tencent(batch)
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(worker, b) for b in batches]
+        for f in as_completed(futs):
+            try:
+                out.update(f.result())
+            except Exception:
+                pass
+    return out
+
+
+def refresh_quote_snapshot() -> int:
+    """拉取全量实时行情写入 SQLite 快照，返回写入条数。供启动/后台定时调用。"""
     try:
         codes = _load_a_shares_list()
-        if codes:
-            name_map = {c["code"]: c.get("name", "") for c in codes}
-            quotes = _fetch_quotes_from_tencent([c["code"] for c in codes])
-            for c in codes:
-                code = c["code"]
-                q = quotes.get(code)
-                if not q:
-                    continue
-                result.append({
-                    "code": code,
-                    "name": name_map.get(code) or q.get("name") or f"股票{code}",
-                    "price": q["price"],
-                    "change_pct": q["change_pct"],
-                    "pe": q["pe"],
-                    "market_cap": q["market_cap"],
-                    "turnover": q["turnover"],
-                })
-        _all_a_shares_cache["ts"] = time.time()
-        _all_a_shares_cache["data"] = result
-        return result
+        if not codes:
+            return 0
+        name_map = {c["code"]: c.get("name", "") for c in codes}
+        quotes = _fetch_quotes_concurrent([c["code"] for c in codes])
+        rows = []
+        for c in codes:
+            code = c["code"]
+            q = quotes.get(code)
+            if not q:
+                continue
+            rows.append((
+                code,
+                name_map.get(code) or q.get("name") or f"股票{code}",
+                q["price"],
+                q["change_pct"],
+                q.get("pe"),
+                q.get("market_cap"),
+                q.get("turnover"),
+                datetime.now().isoformat(),
+            ))
+        if rows:
+            db.upsert_quote_snapshot(rows)
+        print(f"quote snapshot refreshed: {len(rows)} rows")
+        return len(rows)
     except Exception as e:
-        print(f"Error fetching all a shares: {e}")
-        return _all_a_shares_cache["data"] or []
+        print(f"refresh_quote_snapshot error: {e}")
+        return 0
 
 
 @retry_on_error(max_retries=3, delay=1.5)

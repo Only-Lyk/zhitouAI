@@ -137,19 +137,27 @@ export default function HomePage() {
             <h2 className="text-sm font-semibold text-text-secondary">热点板块</h2>
           </div>
         </div>
-        <div className="flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-hide">
-          {sectors.map((s) => (
-            <div
-              key={s.name}
-              className="flex-shrink-0 rounded-lg bg-bg-secondary px-3 py-2 border border-border-default"
-            >
-              <div className="text-xs font-medium">{s.name}</div>
-              <div className={`mt-0.5 text-xs font-mono ${s.change_pct >= 0 ? 'text-up' : 'text-down'}`}>
-                {s.change_pct >= 0 ? '+' : ''}{s.change_pct.toFixed(2)}%
+        {loading ? (
+          <div className="flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-hide">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex-shrink-0 rounded-lg bg-bg-secondary px-3 py-2 border border-border-default h-[52px] w-24 animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <div className="flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-hide">
+            {sectors.map((s) => (
+              <div
+                key={s.name}
+                className="flex-shrink-0 rounded-lg bg-bg-secondary px-3 py-2 border border-border-default"
+              >
+                <div className="text-xs font-medium">{s.name}</div>
+                <div className={`mt-0.5 text-xs font-mono ${s.change_pct >= 0 ? 'text-up' : 'text-down'}`}>
+                  {s.change_pct >= 0 ? '+' : ''}{s.change_pct.toFixed(2)}%
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* AI Recommendations */}

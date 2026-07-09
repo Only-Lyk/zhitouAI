@@ -85,6 +85,17 @@ INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('profit_ratio', '1.3')
 -- 初始化模型配置（默认 DeepSeek）
 INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('llm_models_config', '{"models":[{"id":"deepseek-chat","name":"DeepSeek Chat","base_url":"https://api.deepseek.com","api_key":"","peak_price_per_1k":0.01,"valley_price_per_1k":0.005,"peak_start":"09:00","peak_end":"23:00","default":true}]}');
 
+CREATE TABLE IF NOT EXISTS quote_snapshot (
+    code TEXT PRIMARY KEY,
+    name TEXT,
+    price REAL,
+    change_pct REAL,
+    pe REAL,
+    market_cap REAL,
+    turnover REAL,
+    updated_at TEXT
+);
+
 """
 
 
@@ -225,3 +236,33 @@ def get_latest_recommendation_date(before_date: str) -> Optional[str]:
             (before_date,),
         ).fetchone()
         return row["date"] if row else None
+
+
+# ========== Quote Snapshot（行情快照，避免每次实时拉全市场） ==========
+
+def upsert_quote_snapshot(rows: List[tuple]) -> None:
+    """批量写入行情快照，rows 为 (code,name,price,change_pct,pe,market_cap,turnover,updated_at)"""
+    if not rows:
+        return
+    with get_db() as db:
+        db.executemany(
+            """INSERT OR REPLACE INTO quote_snapshot
+               (code, name, price, change_pct, pe, market_cap, turnover, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        db.commit()
+
+
+def get_quote_snapshot() -> List[Dict[str, Any]]:
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT code, name, price, change_pct, pe, market_cap, turnover FROM quote_snapshot"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_quote_snapshot_meta() -> Optional[str]:
+    with get_db() as db:
+        row = db.execute("SELECT MAX(updated_at) AS ts FROM quote_snapshot").fetchone()
+        return row["ts"] if row else None

@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, ArrowUpDown } from 'lucide-react';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 interface StockRow {
   code: string;
@@ -124,9 +125,7 @@ export default function StockListPage() {
       {/* List */}
       <div className="space-y-2 px-4">
         {loading ? (
-          Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="glass-card h-16 animate-pulse" />
-          ))
+          <LoadingSpinner text="正在加载行情数据…" />
         ) : pageItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
             <Search size={32} className="mb-2 opacity-30" />

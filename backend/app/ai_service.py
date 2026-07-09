@@ -444,22 +444,10 @@ async def get_daily_recommendations() -> List[Dict[str, Any]]:
         return _rows_to_recs(cached)
 
     stocks = get_all_a_shares()
-    candidates = []
-    for s in stocks:
-        name = s.get("name", "")
-        if not name or "ST" in name or name.startswith("*"):
-            continue
-        mc = s.get("market_cap") or 0
-        pe = s.get("pe")
-        if mc < 30:
-            continue
-        if pe is None or pe <= 0:
-            continue
-        if (s.get("change_pct") or 0) <= -5:
-            continue
-        score = _score_stock(s)
-        candidates.append((score, s))
-
+    candidates = _filter_candidates(stocks, relaxed=False)
+    if not candidates:
+        # 市场普跌时放宽条件兜底，保证至少有一定数量的候选
+        candidates = _filter_candidates(stocks, relaxed=True)
     candidates.sort(key=lambda x: x[0], reverse=True)
     top = candidates[:12]
 
@@ -494,9 +482,32 @@ async def get_daily_recommendations() -> List[Dict[str, Any]]:
             },
         })
 
-    # 落库，供"昨日推荐对比"使用
-    db.save_recommendation_history(today, recommendations)
+    # 落库（仅当有候选），供"昨日推荐对比"使用；空结果不缓存，避免当天一直为空
+    if top:
+        db.save_recommendation_history(today, recommendations)
     return recommendations
+
+
+def _filter_candidates(stocks: List[Dict[str, Any]], relaxed: bool = False) -> List[tuple]:
+    """按规则筛选候选股。relaxed=True 时放宽市值/跌幅阈值（市场普跌兜底）。"""
+    out = []
+    mc_min = 10 if relaxed else 30
+    chg_floor = -9 if relaxed else -5
+    for s in stocks:
+        name = s.get("name", "")
+        if not name or "ST" in name or name.startswith("*"):
+            continue
+        mc = s.get("market_cap") or 0
+        pe = s.get("pe")
+        chg = s.get("change_pct") or 0
+        if mc < mc_min:
+            continue
+        if pe is None or pe <= 0:
+            continue
+        if chg <= chg_floor:
+            continue
+        out.append((_score_stock(s), s))
+    return out
 
 
 async def chat_about_stock(message: str, history: List[Dict[str, Any]], model_config: Dict[str, Any] = None) -> AsyncGenerator[str, None]:

@@ -1,4 +1,6 @@
 import os
+import time
+import threading
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +26,18 @@ static_dir = os.path.join(os.path.dirname(__file__), "..", "dist")
 @app.on_event("startup")
 async def startup_event():
     init_db()
+    # 后台线程：定时刷新行情快照，避免每次请求同步拉全市场（极慢）
+    def _refresh_loop():
+        from app import data_service
+        while True:
+            try:
+                data_service.refresh_quote_snapshot()
+            except Exception as e:
+                print(f"background snapshot refresh error: {e}")
+            time.sleep(300)
+
+    t = threading.Thread(target=_refresh_loop, daemon=True)
+    t.start()
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
